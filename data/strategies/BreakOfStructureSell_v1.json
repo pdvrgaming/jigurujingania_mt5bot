@@ -1,39 +1,16 @@
-{
-  "name": "BreakOfStructureSell",
-  "version": 1,
-  "symbol": "XAUUSD",
-  "timeframe": "M15",
-  "direction": "SELL",
-  "description": "SMC: Break of Structure (BOS) to the downside.\nPrice breaks below a recent swing low (2 bars ago low) and closes below it.\nAlso current bar must be bearish.\nThis signals potential SMC bearish continuation.",
-  "conditions": {
-    "operator": "AND",
-    "rules": [
-      {
-        "left": {
-          "type": "price",
-          "field": "close",
-          "period": 0
-        },
-        "operator": "<",
-        "right": {
-          "type": "price",
-          "field": "low",
-          "period": 2
-        }
-      },
-      {
-        "left": {
-          "type": "price",
-          "field": "close",
-          "period": 0
-        },
-        "operator": "<",
-        "right": {
-          "type": "price",
-          "field": "open",
-          "period": 0
-        }
-      }
-    ]
-  }
+﻿{
+    "name": "BreakOfStructureSell",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "M15",
+    "direction": "SELL",
+    "description": "SMC: Price closes below previous 2 lows = confirmed bearish Break of Structure",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {"left": {"type": "price", "name": "close", "period": 0}, "operator": "<", "right": {"type": "price", "name": "low", "period": 1}},
+            {"left": {"type": "price", "name": "close", "period": 0}, "operator": "<", "right": {"type": "price", "name": "low", "period": 2}},
+            {"left": {"type": "price", "name": "close", "period": 0}, "operator": "<", "right": {"type": "price", "name": "open", "period": 0}}
+        ]
+    }
 }

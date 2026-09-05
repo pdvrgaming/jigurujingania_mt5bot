@@ -1,0 +1,15 @@
+﻿{
+    "name": "EMACrossoverBuy",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "H1",
+    "direction": "BUY",
+    "description": "Trend: EMA20 crosses above EMA50 confirming bullish trend shift. RSI > 50 for momentum confirmation.",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {"left": {"type": "indicator", "name": "EMA", "period": 20}, "operator": "crosses_above", "right": {"type": "indicator", "name": "EMA", "period": 50}},
+            {"left": {"type": "indicator", "name": "RSI", "period": 14}, "operator": ">", "right": {"type": "constant", "value": 50}}
+        ]
+    }
+}

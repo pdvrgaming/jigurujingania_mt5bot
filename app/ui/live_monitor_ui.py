@@ -1,11 +1,12 @@
 """
-Live Monitor UI — real-time strategy signal tracking against MT5 data.
-Uses a background QThread to poll for new closed candles every N seconds.
+Live Monitor UI — real-time strategy signal tracking.
+Supports monitoring multiple strategies simultaneously.
+Each strategy runs in its own QThread and emits signals independently.
 """
 import json
 import csv
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytz
 
@@ -47,37 +48,47 @@ def _ist(ts) -> str:
 # Background worker
 # ────────────────────────────────────────────────────────────────
 
+UTC = timezone.utc
+
+
+def _is_market_closed() -> bool:
+    """XAUUSD: closed Friday 21:00 UTC → Sunday 21:00 UTC."""
+    now = datetime.now(UTC)
+    wd, h = now.weekday(), now.hour
+    return ((wd == 4 and h >= 21) or wd == 5 or (wd == 6 and h < 21))
+
+
 class _MonitorWorker(QObject):
     """
-    Runs in a QThread. Polls MT5 for the latest closed candle,
-    evaluates the strategy, emits signal_found when conditions are met.
+    Runs in a QThread. Polls MT5 for the latest closed candle and evaluates
+    ONE strategy. Multiple workers run independently for multi-strategy mode.
     """
-    signal_found = Signal(dict)   # emits signal dict
-    status_update = Signal(str)   # emits status text
-    candle_checked = Signal(dict) # emits the latest candle dict (always)
+    signal_found  = Signal(dict)   # {sig dict + strategy_name}
+    status_update = Signal(str)
+    candle_checked = Signal(dict)
     error_occurred = Signal(str)
 
     def __init__(self, strategy: dict, symbol: str, timeframe: str,
                  interval_sec: int):
         super().__init__()
-        self.strategy = strategy
-        self.symbol = symbol
-        self.timeframe = timeframe
+        self.strategy     = strategy
+        self.symbol       = symbol
+        self.timeframe    = timeframe
         self.interval_sec = interval_sec
-        self.engine = StrategyEngine()
-        self._last_ts = None
-        self._running = False
+        self.engine       = StrategyEngine()
+        self._last_ts     = None
+        self._running     = False
+        self._was_connected = False
 
     def run(self):
         self._running = True
-        self._was_connected = False
-        self.status_update.emit("▶ Monitoring started…")
+        name = self.strategy.get('name', '?')
+        self.status_update.emit(f"▶ [{name}] Monitoring {self.symbol} {self.timeframe}…")
         while self._running:
             try:
                 self._check()
             except Exception as e:
                 self.error_occurred.emit(str(e))
-            # Sleep in 0.5s chunks so stop() is responsive
             for _ in range(self.interval_sec * 2):
                 if not self._running:
                     break
@@ -91,34 +102,29 @@ class _MonitorWorker(QObject):
             mt5_provider.connect()
             if not mt5_provider.is_connected():
                 if self._was_connected:
-                    # First time we notice disconnect — log it
-                    self.status_update.emit("🔴 MT5_DISCONNECTED — retrying every cycle…")
+                    self.status_update.emit("🔴 MT5_DISCONNECTED — retrying…")
                     self._was_connected = False
                 else:
                     self.status_update.emit("⚠ MT5 still disconnected — waiting…")
                 return
             else:
-                # Just reconnected
-                self.status_update.emit("🟢 MT5_RECONNECTED — resuming monitoring.")
+                self.status_update.emit("🟢 MT5_RECONNECTED — resuming.")
                 self._was_connected = True
         elif not self._was_connected:
             self._was_connected = True
 
-        # Fetch the last 100 closed candles
         df = mt5_provider.get_candles(self.symbol, self.timeframe, count=100)
         if df is None or df.empty:
             self.status_update.emit(f"⚠ No data for {self.symbol} {self.timeframe}")
             return
 
-        # Drop last (possibly incomplete) candle
-        df = df.iloc[:-1].copy()
+        df = df.iloc[:-1].copy()  # drop incomplete last candle
         if df.empty:
             return
 
         latest = df.iloc[-1]
         latest_ts = latest["time"]
 
-        # Emit candle info for "Last Checked" display
         self.candle_checked.emit({
             "time": _ist(latest_ts),
             "close": float(latest["close"]),
@@ -126,17 +132,14 @@ class _MonitorWorker(QObject):
             "timeframe": self.timeframe,
         })
 
-        # Skip if already processed this candle
         if self._last_ts is not None and latest_ts == self._last_ts:
             return
-
         self._last_ts = latest_ts
 
-        # Evaluate strategy on full dataframe
         signals = self.engine.evaluate(self.strategy, df)
-        # Check only if last candle produced a signal
         for sig in signals:
             if sig["index"] == len(df) - 1:
+                sig["strategy_name"] = self.strategy.get("name", "?")
                 self.signal_found.emit(sig)
                 break
 
@@ -148,15 +151,15 @@ class _MonitorWorker(QObject):
 class LiveMonitorUI(QWidget):
     def __init__(self, monitor=None, alerter=None):
         super().__init__()
-        self.strategy = None
-        self.engine = StrategyEngine()
-        self._worker = None
-        self._thread = None
+        self.strategy = None            # primary strategy (legacy)
+        self._strategies: list[dict] = []  # multi-strategy list
+        self._workers: list[_MonitorWorker] = []
+        self._threads: list[QThread] = []
         self._signal_count = 0
-        self._journal_tab = None   # injected by MainWindow
+        self._journal_tab = None
         self._signal_log_path = Path(
             config.get("data_directory", "data")) / "live_signals.csv"
-
+        self._signals_data: list[dict] = []
         self._build_ui()
 
     # ── UI Construction ───────────────────────────────────────────
@@ -178,6 +181,19 @@ class LiveMonitorUI(QWidget):
         hdr.addStretch()
         hdr.addWidget(self.lbl_mt5)
         root.addLayout(hdr)
+
+        # ── Market closed warning ─────────────────────────────────
+        self.lbl_market = QLabel(
+            "⚠  MARKET CLOSED  (Saturday 02:30 IST → Monday 02:30 IST) "
+            "— Live signals based on stale candle data. Use for backtesting only."
+        )
+        self.lbl_market.setWordWrap(True)
+        self.lbl_market.setStyleSheet(
+            "color:#f5a623; background:#1a1200; border:1px solid #3a2a00;"
+            "border-radius:4px; padding:5px 10px; font-size:11px;"
+        )
+        self.lbl_market.setVisible(_is_market_closed())
+        root.addWidget(self.lbl_market)
 
         # ── Strategy & Config ────────────────────────────────────
         cfg_group = QGroupBox("MONITOR CONFIGURATION")
@@ -255,6 +271,35 @@ class LiveMonitorUI(QWidget):
         ctrl.addWidget(self.btn_export)
         root.addLayout(ctrl)
 
+        # ── Multi-strategy panel ──────────────────────────────────
+        multi_group = QGroupBox("ACTIVE STRATEGIES  (add up to 3 — all run simultaneously)")
+        multi_group.setStyleSheet(
+            "QGroupBox{color:#555;font-size:10px;font-weight:bold;"
+            "border:1px solid #2a2a4a;border-radius:5px;margin-top:4px;padding:6px;}"
+        )
+        multi_lay = QHBoxLayout(multi_group)
+
+        from PySide6.QtWidgets import QListWidget
+        self.strategy_list = QListWidget()
+        self.strategy_list.setFixedHeight(70)
+        self.strategy_list.setStyleSheet(
+            "QListWidget{background:#0d0d1a;color:#aaa;font-size:11px;"
+            "border:1px solid #2a2a4a;border-radius:3px;}"
+        )
+        multi_lay.addWidget(self.strategy_list)
+
+        ml_btns = QVBoxLayout()
+        self.btn_add_strat = QPushButton("➕ Add")
+        self.btn_add_strat.setToolTip("Load and add a strategy to run alongside others")
+        self.btn_add_strat.clicked.connect(self._add_strategy)
+        self.btn_rem_strat = QPushButton("🗑 Remove")
+        self.btn_rem_strat.clicked.connect(self._remove_strategy)
+        ml_btns.addWidget(self.btn_add_strat)
+        ml_btns.addWidget(self.btn_rem_strat)
+        ml_btns.addStretch()
+        multi_lay.addLayout(ml_btns)
+        root.addWidget(multi_group)
+
         # ── Splitter: signal table + live log ───────────────────
         splitter = QSplitter(Qt.Vertical)
 
@@ -275,12 +320,12 @@ class LiveMonitorUI(QWidget):
         sig_lay.addLayout(tbl_hdr)
 
         self.sig_table = QTableWidget()
-        self.sig_table.setColumnCount(6)
+        self.sig_table.setColumnCount(7)
         self.sig_table.setHorizontalHeaderLabels([
-            "IST Time", "Direction", "Symbol", "Timeframe", "Price", "Conditions"
+            "IST Time", "Strategy", "Direction", "Symbol", "Timeframe", "Price", "Conditions"
         ])
         self.sig_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.sig_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.sig_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.sig_table.setAlternatingRowColors(True)
         self.sig_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.sig_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -317,78 +362,139 @@ class LiveMonitorUI(QWidget):
         self._status_timer.start(5000)
         self._refresh_mt5_status()
 
-        # Store signal data for detail view
-        self._signals_data: list[dict] = []
-
     # ── Strategy loading ─────────────────────────────────────────
 
     def _load_strategy(self):
+        """Load primary (single) strategy — also sets symbol/TF dropdowns."""
         fp, _ = QFileDialog.getOpenFileName(
             self, "Open Strategy JSON", "", "JSON Files (*.json)")
         if not fp:
             return
         try:
             with open(fp) as f:
-                self.strategy = json.load(f)
-            name = self.strategy.get("name", "?")
-            sym = self.strategy.get("symbol", "XAUUSD")
-            tf = self.strategy.get("timeframe", "M15")
+                strat = json.load(f)
+            self.strategy = strat
+            name = strat.get("name", "?")
+            sym  = strat.get("symbol", "XAUUSD")
+            tf   = strat.get("timeframe", "M15")
             self.lbl_strat.setText(f"✅ {name}  ({sym} {tf})")
             self.lbl_strat.setStyleSheet("color:#00d26a; font-weight:bold;")
             self.cb_symbol.setCurrentText(sym)
             self.cb_tf.setCurrentText(tf)
             self._log(f"Strategy loaded: {name}")
+            # Also add to multi-strategy list if not already there
+            self._add_strategy_obj(strat)
         except Exception as e:
             QMessageBox.warning(self, "Load Error", str(e))
+
+    def _add_strategy(self):
+        """Add a strategy to the multi-strategy list."""
+        if len(self._strategies) >= 3:
+            QMessageBox.information(
+                self, "Limit Reached",
+                "Maximum 3 strategies can run simultaneously.\n"
+                "Remove one first, then add another.")
+            return
+        fp, _ = QFileDialog.getOpenFileName(
+            self, "Add Strategy JSON", "", "JSON Files (*.json)")
+        if not fp:
+            return
+        try:
+            with open(fp) as f:
+                strat = json.load(f)
+            self._add_strategy_obj(strat)
+        except Exception as e:
+            QMessageBox.warning(self, "Load Error", str(e))
+
+    def _add_strategy_obj(self, strat: dict):
+        name = strat.get("name", "?")
+        # Avoid duplicates
+        for s in self._strategies:
+            if s.get("name") == name:
+                return
+        if len(self._strategies) >= 3:
+            return
+        self._strategies.append(strat)
+        sym = strat.get("symbol", "?")
+        tf  = strat.get("timeframe", "?")
+        dr  = strat.get("direction", "?")
+        self.strategy_list.addItem(f"[{dr}] {name}  ({sym} {tf})")
+        self._log(f"+ Added strategy: {name}  ({sym} {tf})")
+
+    def _remove_strategy(self):
+        row = self.strategy_list.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Select", "Select a strategy in the list first.")
+            return
+        removed = self._strategies.pop(row)
+        self.strategy_list.takeItem(row)
+        self._log(f"- Removed strategy: {removed.get('name', '?')}")
 
     # ── Start / Stop ─────────────────────────────────────────────
 
     def _start(self):
-        if not self.strategy:
-            QMessageBox.warning(self, "No Strategy", "Load a strategy JSON first.")
-            return
+        if not self._strategies:
+            if self.strategy:
+                self._add_strategy_obj(self.strategy)
+            else:
+                QMessageBox.warning(
+                    self, "No Strategy",
+                    "Load at least one strategy using '📂 Load Strategy' or '➕ Add'.")
+                return
+
         if not mt5_provider.is_connected():
             if not mt5_provider.connect():
-                QMessageBox.critical(self, "MT5 Error",
+                QMessageBox.critical(
+                    self, "MT5 Error",
                     "Cannot connect to MT5. Make sure the terminal is running.")
                 return
         self._refresh_mt5_status()
 
-        symbol = self.cb_symbol.currentText().strip()
-        timeframe = self.cb_tf.currentText()
+        symbol   = self.cb_symbol.currentText().strip()
         interval = self.spin_interval.value()
 
-        self._worker = _MonitorWorker(self.strategy, symbol, timeframe, interval)
-        self._thread = QThread()
-        self._worker.moveToThread(self._thread)
-
-        self._thread.started.connect(self._worker.run)
-        self._worker.signal_found.connect(self._on_signal_found)
-        self._worker.status_update.connect(self._log)
-        self._worker.candle_checked.connect(self._on_candle_checked)
-        self._worker.error_occurred.connect(lambda e: self._log(f"❌ Error: {e}"))
-
-        self._thread.start()
+        names = []
+        for strat in self._strategies:
+            tf = strat.get("timeframe", self.cb_tf.currentText())
+            sym = strat.get("symbol", symbol)
+            worker = _MonitorWorker(strat, sym, tf, interval)
+            thread = QThread()
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.signal_found.connect(self._on_signal_found)
+            worker.status_update.connect(self._log)
+            worker.candle_checked.connect(self._on_candle_checked)
+            worker.error_occurred.connect(
+                lambda e: self._log(f"❌ Error: {e}"))
+            thread.start()
+            self._workers.append(worker)
+            self._threads.append(thread)
+            names.append(strat.get("name", "?"))
 
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_load_strat.setEnabled(False)
-        self.lbl_status.setText(f"▶  MONITORING — {symbol} {timeframe}")
+        self.btn_add_strat.setEnabled(False)
+        self.btn_rem_strat.setEnabled(False)
+        label = " + ".join(names)
+        self.lbl_status.setText(f"▶  MONITORING — {label}")
         self.lbl_status.setStyleSheet("color:#00d26a; font-weight:bold;")
-        self._log(f"▶ Started monitoring {symbol} {timeframe} every {interval}s")
+        self._log(f"▶ Started {len(self._workers)} strategies: {label}")
 
     def _stop(self):
-        if self._worker:
-            self._worker.stop()
-        if self._thread:
-            self._thread.quit()
-            self._thread.wait(3000)
-        self._worker = None
-        self._thread = None
+        for w in self._workers:
+            w.stop()
+        for t in self._threads:
+            t.quit()
+            t.wait(3000)
+        self._workers.clear()
+        self._threads.clear()
 
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_load_strat.setEnabled(True)
+        self.btn_add_strat.setEnabled(True)
+        self.btn_rem_strat.setEnabled(True)
         self.lbl_status.setText("⏹  MONITOR STOPPED")
         self.lbl_status.setStyleSheet("color:#888; font-weight:bold;")
         self._log("⏹ Monitoring stopped.")
@@ -397,46 +503,58 @@ class LiveMonitorUI(QWidget):
 
     def _on_signal_found(self, sig: dict):
         self._signal_count += 1
-        self.lbl_sig_count.setText(f"{self._signal_count} signal{'s' if self._signal_count != 1 else ''}")
+        self.lbl_sig_count.setText(
+            f"{self._signal_count} signal{'s' if self._signal_count != 1 else ''}")
 
-        direction = self.strategy.get("direction", "BUY")
-        symbol = self.cb_symbol.currentText()
+        strat_name = sig.get("strategy_name", "?")
+        # Look up strategy direction from loaded list
+        direction = "BUY"
+        symbol    = self.cb_symbol.currentText()
         timeframe = self.cb_tf.currentText()
-        price = sig.get("price", 0)
-        ts_ist = _ist(sig.get("timestamp", ""))
-        debug = sig.get("debug", [])
+        for s in self._strategies:
+            if s.get("name") == strat_name:
+                direction = s.get("direction", "BUY")
+                symbol    = s.get("symbol", symbol)
+                timeframe = s.get("timeframe", timeframe)
+                break
 
-        # Store for detail view
+        price  = sig.get("price", 0)
+        ts_ist = _ist(sig.get("timestamp", ""))
+        debug  = sig.get("debug", [])
+
         full_sig = {
-            "ts_ist": ts_ist,
-            "direction": direction,
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "price": price,
-            "debug": debug,
+            "ts_ist":      ts_ist,
+            "strategy":    strat_name,
+            "direction":   direction,
+            "symbol":      symbol,
+            "timeframe":   timeframe,
+            "price":       price,
+            "debug":       debug,
         }
         self._signals_data.insert(0, full_sig)
 
-        # Add row to table (newest first)
+        # Add row to table — 7 columns now
         row = 0
         self.sig_table.insertRow(row)
         color = QColor("#00d26a") if direction == "BUY" else QColor("#ff4757")
-        cells = [ts_ist, direction, symbol, timeframe, f"{price:,.5f}",
-                 " | ".join(debug[:2])]
+        cells = [
+            ts_ist, strat_name, direction, symbol,
+            timeframe, f"{price:,.5f}", " | ".join(debug[:2])
+        ]
         for col, val in enumerate(cells):
             item = QTableWidgetItem(str(val))
             item.setTextAlignment(Qt.AlignCenter)
-            if col == 1:
+            if col == 2:  # Direction column
                 item.setForeground(color)
                 item.setFont(QFont("Segoe UI", 9, QFont.Bold))
             self.sig_table.setItem(row, col, item)
 
-        self._log(f"🔔 SIGNAL: {direction} {symbol} {timeframe} @ {price:,.5f}")
+        self._log(
+            f"🔔 [{strat_name}] SIGNAL: {direction} {symbol} {timeframe} @ {price:,.5f}")
 
-        # Desktop notification
         if self.chk_notify.isChecked():
             notifier.signal_alert(
-                strategy_name=self.strategy.get("name", "?"),
+                strategy_name=strat_name,
                 symbol=symbol,
                 timeframe=timeframe,
                 direction=direction,
@@ -445,11 +563,10 @@ class LiveMonitorUI(QWidget):
                 debug_lines=debug
             )
 
-        # Auto-record in Signal Journal
         if self._journal_tab is not None:
             try:
                 self._journal_tab.add_signal(
-                    strategy_name=self.strategy.get("name", "?"),
+                    strategy_name=strat_name,
                     symbol=symbol,
                     timeframe=timeframe,
                     direction=direction,
@@ -460,7 +577,6 @@ class LiveMonitorUI(QWidget):
             except Exception as je:
                 logger.error(f"Journal add_signal failed: {je}")
 
-        # Persist to CSV log
         self._append_signal_csv(full_sig)
 
     def _on_candle_checked(self, info: dict):
@@ -474,10 +590,11 @@ class LiveMonitorUI(QWidget):
             sig = self._signals_data[row]
             lines = [
                 f"⏱  Time (IST): {sig['ts_ist']}",
+                f"📐 Strategy:   {sig.get('strategy','?')}",
                 f"📈 Direction:  {sig['direction']}",
                 f"💰 Price:      {sig['price']:,.5f}",
                 "",
-                "Condition Results:",
+                "Conditions that fired:",
             ]
             for d in sig.get("debug", []):
                 lines.append(f"   ✓ {d}")

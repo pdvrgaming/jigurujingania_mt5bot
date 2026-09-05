@@ -233,16 +233,27 @@ class ChartUI(QWidget):
             QMessageBox.warning(self, "Fetch Error", str(e))
 
     def _check_market_status(self):
-        """Show a warning banner if the market appears closed."""
+        """
+        XAUUSD (Gold) trades on Forex market.
+        Closes: Friday    21:00 UTC  = Saturday 02:30 IST
+        Opens:  Sunday    21:00 UTC  = Monday   02:30 IST
+        """
         now_utc = datetime.now(UTC)
-        weekday = now_utc.weekday()  # 5=Sat, 6=Sun
+        weekday = now_utc.weekday()  # 0=Mon … 4=Fri … 5=Sat … 6=Sun
+        hour    = now_utc.hour
 
-        # XAUUSD (Forex Gold): closed Sat 22:00 UTC – Sun 22:00 UTC
-        is_weekend = weekday == 5 or (weekday == 6 and now_utc.hour < 22)
-        if is_weekend:
+        # Closed window in UTC: Friday ≥ 21:00 → Sunday < 21:00
+        is_closed = (
+            (weekday == 4 and hour >= 21) or   # Friday after 21:00 UTC
+            weekday == 5 or                     # Entire Saturday UTC
+            (weekday == 6 and hour < 21)        # Sunday before 21:00 UTC
+        )
+
+        if is_closed:
             self.lbl_market.setText(
-                "⚠  MARKET CLOSED (Weekend) — Chart shows last available candles from when market was open. "
-                "Signals during this time are based on stale data."
+                "⚠  MARKET CLOSED  (Saturday 02:30 IST → Monday 02:30 IST)  "
+                "— Chart shows last candles from before Friday close. "
+                "Signals on this data are NOT valid live signals."
             )
             self.lbl_market.setVisible(True)
         else:

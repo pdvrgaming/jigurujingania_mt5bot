@@ -1,0 +1,17 @@
+﻿{
+    "name": "BearishEngulfing",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "M15",
+    "direction": "SELL",
+    "description": "Price Action: Current bearish candle completely engulfs the previous bullish candle. Strong reversal signal.",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {"left": {"type": "price", "name": "close", "period": 0}, "operator": "<", "right": {"type": "price", "name": "open", "period": 0}},
+            {"left": {"type": "price", "name": "close", "period": 1}, "operator": ">", "right": {"type": "price", "name": "open", "period": 1}},
+            {"left": {"type": "price", "name": "close", "period": 0}, "operator": "<", "right": {"type": "price", "name": "open", "period": 1}},
+            {"left": {"type": "price", "name": "open", "period": 0}, "operator": ">", "right": {"type": "price", "name": "close", "period": 1}}
+        ]
+    }
+}

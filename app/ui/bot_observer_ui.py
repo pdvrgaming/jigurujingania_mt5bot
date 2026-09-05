@@ -200,7 +200,7 @@ class BotObserverUI(QWidget):
 
         filter_lay.addWidget(QLabel("Hide price snapshots:"))
         self.cb_hide_snap = QComboBox()
-        self.cb_hide_snap.addItems(["Yes", "No"])
+        self.cb_hide_snap.addItems(["No", "Yes"])   # default No = show all
         self.cb_hide_snap.setFixedWidth(60)
         self.cb_hide_snap.currentIndexChanged.connect(self._refresh_table)
         filter_lay.addWidget(self.cb_hide_snap)
@@ -210,6 +210,11 @@ class BotObserverUI(QWidget):
         self.lbl_row_count = QLabel("0 events")
         self.lbl_row_count.setStyleSheet("color:#666; font-size:11px;")
         filter_lay.addWidget(self.lbl_row_count)
+
+        # Hidden snapshot count
+        self.lbl_snap_hidden = QLabel("")
+        self.lbl_snap_hidden.setStyleSheet("color:#444466; font-size:10px; font-style:italic;")
+        filter_lay.addWidget(self.lbl_snap_hidden)
         root.addLayout(filter_lay)
 
         # ── Events table ────────────────────────────────────────────────────
@@ -350,8 +355,14 @@ class BotObserverUI(QWidget):
         if flt != "All":
             records = [r for r in records if r.get("event_type") == flt]
         if hide_snap:
+            snap_count = sum(
+                1 for r in records if r.get("event_type") == "PRICE_SNAPSHOT")
             records = [r for r in records
                        if r.get("event_type") != "PRICE_SNAPSHOT"]
+            self.lbl_snap_hidden.setText(
+                f"({snap_count} PRICE_SNAPSHOTs hidden — they ARE being recorded)")
+        else:
+            self.lbl_snap_hidden.setText("")
 
         # Show newest first
         records = list(reversed(records))
