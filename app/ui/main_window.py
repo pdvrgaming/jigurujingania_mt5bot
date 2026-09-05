@@ -31,12 +31,13 @@ class MainWindow(QMainWindow):
         self.alerter = DesktopAlerter(self)
         
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
         self.setCentralWidget(self.tabs)
         
         # Tabs
         self.dashboard_tab = Dashboard(provider, self.bot_observer)
         self.builder_tab = StrategyBuilder()
-        self.monitor_tab = LiveMonitorUI(self.live_monitor, self.alerter)
+        self.monitor_tab = LiveMonitorUI()
         self.backtest_tab = BacktestUI()
         self.chart_tab = ChartUI()
         self.journal_tab = SignalJournalUI()
@@ -45,6 +46,9 @@ class MainWindow(QMainWindow):
         self.settings_tab = SettingsUI()
         self.help_tab = HelpTab()
         
+        # Wire backtest results → chart overlay
+        self.backtest_tab.backtest_done.connect(self._on_backtest_done)
+
         self.tabs.addTab(self.dashboard_tab, "Dashboard")
         self.tabs.addTab(self.builder_tab, "Strategies")
         self.tabs.addTab(self.monitor_tab, "Monitor")
@@ -57,7 +61,19 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.help_tab, "Help & Docs")
         
         logger.debug("MainWindow initialized.")
-        
+
+    def _on_backtest_done(self, signals, df):
+        """Forward backtest results to the chart tab for signal overlay."""
+        self.chart_tab.load_signals(signals, df)
+        # Optionally switch to chart tab
+        # self.tabs.setCurrentWidget(self.chart_tab)
+
     def closeEvent(self, event):
+        # Gracefully stop the live monitor thread
+        if hasattr(self.monitor_tab, '_stop'):
+            try:
+                self.monitor_tab._stop()
+            except Exception:
+                pass
         provider.disconnect()
         super().closeEvent(event)

@@ -254,6 +254,7 @@ class StrategyEngine:
 
             balance += profit
             trades.append({
+                "signal_index": idx,
                 "entry_time": str(sig["timestamp"]),
                 "exit_time": str(exit_time),
                 "direction": direction,
@@ -306,6 +307,7 @@ class StrategyEngine:
                 "largest_loss": round(min((t["profit"] for t in trades), default=0), 2),
                 "signals_total": len(signals),
             },
+            "signals": signals,
             "trades": trades,
             "equity_curve": equity_curve
         }

@@ -1,90 +1,531 @@
+"""
+Live Monitor UI — real-time strategy signal tracking against MT5 data.
+Uses a background QThread to poll for new closed candles every N seconds.
+"""
 import json
+import csv
 from pathlib import Path
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QFileDialog, QMessageBox, QTextEdit)
+from datetime import datetime
+
+import pytz
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFileDialog, QMessageBox, QGroupBox, QTableWidget,
+    QTableWidgetItem, QHeaderView, QSpinBox, QFrame,
+    QComboBox, QSplitter, QTextEdit, QCheckBox, QApplication
+)
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread
+from PySide6.QtGui import QColor, QFont
+
 from app.core.config import config
+from app.core.strategy_engine import StrategyEngine
+from app.core.mt5_provider import provider as mt5_provider
+from app.core.notifier import notifier
+from app.core.logger import setup_logger
+
+logger = setup_logger("app.ui.live_monitor")
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def _ist(ts) -> str:
+    """Convert a timestamp value to IST string."""
+    try:
+        if hasattr(ts, "tz_convert"):
+            return ts.tz_convert(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+        if hasattr(ts, "timestamp"):
+            import pytz
+            utc = pytz.utc.localize(ts) if ts.tzinfo is None else ts
+            return utc.astimezone(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+        return str(ts)
+    except Exception:
+        return str(ts)
+
+
+# ────────────────────────────────────────────────────────────────
+# Background worker
+# ────────────────────────────────────────────────────────────────
+
+class _MonitorWorker(QObject):
+    """
+    Runs in a QThread. Polls MT5 for the latest closed candle,
+    evaluates the strategy, emits signal_found when conditions are met.
+    """
+    signal_found = Signal(dict)   # emits signal dict
+    status_update = Signal(str)   # emits status text
+    candle_checked = Signal(dict) # emits the latest candle dict (always)
+    error_occurred = Signal(str)
+
+    def __init__(self, strategy: dict, symbol: str, timeframe: str,
+                 interval_sec: int):
+        super().__init__()
+        self.strategy = strategy
+        self.symbol = symbol
+        self.timeframe = timeframe
+        self.interval_sec = interval_sec
+        self.engine = StrategyEngine()
+        self._last_ts = None
+        self._running = False
+
+    def run(self):
+        self._running = True
+        self.status_update.emit("▶ Monitoring started…")
+        while self._running:
+            try:
+                self._check()
+            except Exception as e:
+                self.error_occurred.emit(str(e))
+            # Sleep in 0.5s chunks so stop() is responsive
+            for _ in range(self.interval_sec * 2):
+                if not self._running:
+                    break
+                QThread.msleep(500)
+
+    def stop(self):
+        self._running = False
+
+    def _check(self):
+        if not mt5_provider.is_connected():
+            mt5_provider.connect()
+            if not mt5_provider.is_connected():
+                self.status_update.emit("⚠ MT5 disconnected — retrying…")
+                return
+
+        # Fetch the last 100 closed candles
+        df = mt5_provider.get_candles(self.symbol, self.timeframe, count=100)
+        if df is None or df.empty:
+            self.status_update.emit(f"⚠ No data for {self.symbol} {self.timeframe}")
+            return
+
+        # Drop last (possibly incomplete) candle
+        df = df.iloc[:-1].copy()
+        if df.empty:
+            return
+
+        latest = df.iloc[-1]
+        latest_ts = latest["time"]
+
+        # Emit candle info for "Last Checked" display
+        self.candle_checked.emit({
+            "time": _ist(latest_ts),
+            "close": float(latest["close"]),
+            "symbol": self.symbol,
+            "timeframe": self.timeframe,
+        })
+
+        # Skip if already processed this candle
+        if self._last_ts is not None and latest_ts == self._last_ts:
+            return
+
+        self._last_ts = latest_ts
+
+        # Evaluate strategy on full dataframe
+        signals = self.engine.evaluate(self.strategy, df)
+        # Check only if last candle produced a signal
+        for sig in signals:
+            if sig["index"] == len(df) - 1:
+                self.signal_found.emit(sig)
+                break
+
+
+# ────────────────────────────────────────────────────────────────
+# Main UI
+# ────────────────────────────────────────────────────────────────
 
 class LiveMonitorUI(QWidget):
-    def __init__(self, monitor, alerter):
+    def __init__(self, monitor=None, alerter=None):
         super().__init__()
-        self.monitor = monitor
-        self.alerter = alerter
-        self.active_strategy = None
-        
-        layout = QVBoxLayout()
-        
-        self.status = QLabel("Live Monitor: STOPPED")
-        self.status.setStyleSheet("font-size: 18px; font-weight: bold;")
-        layout.addWidget(self.status)
-        
-        self.strat_label = QLabel("Strategy: None")
-        layout.addWidget(self.strat_label)
-        
+        self.strategy = None
+        self.engine = StrategyEngine()
+        self._worker = None
+        self._thread = None
+        self._signal_count = 0
+        self._signal_log_path = Path(
+            config.get("data_directory", "data")) / "live_signals.csv"
+
+        self._build_ui()
+
+    # ── UI Construction ───────────────────────────────────────────
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setSpacing(6)
+
+        # ── Header status bar ────────────────────────────────────
+        hdr = QHBoxLayout()
+        self.lbl_status = QLabel("⏹  MONITOR STOPPED")
+        self.lbl_status.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        self.lbl_status.setStyleSheet("color: #888;")
+
+        self.lbl_mt5 = QLabel("MT5: ○ Disconnected")
+        self.lbl_mt5.setStyleSheet("color: #ff4757; font-weight: bold;")
+
+        hdr.addWidget(self.lbl_status)
+        hdr.addStretch()
+        hdr.addWidget(self.lbl_mt5)
+        root.addLayout(hdr)
+
+        # ── Strategy & Config ────────────────────────────────────
+        cfg_group = QGroupBox("MONITOR CONFIGURATION")
+        cfg_lay = QHBoxLayout(cfg_group)
+
+        self.btn_load_strat = QPushButton("📂 Load Strategy")
+        self.btn_load_strat.clicked.connect(self._load_strategy)
+        self.lbl_strat = QLabel("No strategy loaded")
+        self.lbl_strat.setStyleSheet("color: #888; font-style: italic;")
+
+        cfg_lay.addWidget(self.btn_load_strat)
+        cfg_lay.addWidget(self.lbl_strat)
+        cfg_lay.addStretch()
+
+        cfg_lay.addWidget(QLabel("Symbol:"))
+        self.cb_symbol = QComboBox()
+        self.cb_symbol.setEditable(True)
+        self.cb_symbol.addItems(["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"])
+        self.cb_symbol.setFixedWidth(100)
+        cfg_lay.addWidget(self.cb_symbol)
+
+        cfg_lay.addWidget(QLabel("TF:"))
+        self.cb_tf = QComboBox()
+        self.cb_tf.addItems(["M1", "M5", "M15", "M30", "H1", "H4", "D1"])
+        self.cb_tf.setCurrentText("M15")
+        self.cb_tf.setFixedWidth(60)
+        cfg_lay.addWidget(self.cb_tf)
+
+        cfg_lay.addWidget(QLabel("Poll (sec):"))
+        self.spin_interval = QSpinBox()
+        self.spin_interval.setRange(5, 300)
+        self.spin_interval.setValue(30)
+        self.spin_interval.setFixedWidth(60)
+        cfg_lay.addWidget(self.spin_interval)
+
+        self.chk_notify = QCheckBox("Desktop Alerts")
+        self.chk_notify.setChecked(True)
+        cfg_lay.addWidget(self.chk_notify)
+
+        root.addWidget(cfg_group)
+
+        # ── Control buttons ──────────────────────────────────────
         ctrl = QHBoxLayout()
-        self.btn_load = QPushButton("Load Strategy")
-        self.btn_load.clicked.connect(self.load_strategy)
-        
-        self.btn_start = QPushButton("START MONITORING")
-        self.btn_start.clicked.connect(self.start_monitoring)
-        
-        self.btn_stop = QPushButton("STOP MONITORING")
-        self.btn_stop.clicked.connect(self.stop_monitoring)
+        self.btn_start = QPushButton("▶  START MONITORING")
+        self.btn_start.setMinimumHeight(38)
+        self.btn_start.setStyleSheet("""
+            QPushButton { background:#1a6b3a; color:white; font-weight:bold;
+                          font-size:13px; border-radius:5px; border:none; }
+            QPushButton:hover { background:#228b4e; }
+            QPushButton:disabled { background:#333; color:#666; }
+        """)
+        self.btn_start.clicked.connect(self._start)
+
+        self.btn_stop = QPushButton("⏹  STOP")
+        self.btn_stop.setMinimumHeight(38)
         self.btn_stop.setEnabled(False)
-        
-        ctrl.addWidget(self.btn_load)
+        self.btn_stop.setStyleSheet("""
+            QPushButton { background:#8b1a1a; color:white; font-weight:bold;
+                          font-size:13px; border-radius:5px; border:none; }
+            QPushButton:hover { background:#b22222; }
+            QPushButton:disabled { background:#333; color:#666; }
+        """)
+        self.btn_stop.clicked.connect(self._stop)
+
+        self.btn_test_notify = QPushButton("🔔 Test Notification")
+        self.btn_test_notify.clicked.connect(self._test_notification)
+
+        self.btn_export = QPushButton("💾 Export Signals CSV")
+        self.btn_export.clicked.connect(self._export_signals)
+
         ctrl.addWidget(self.btn_start)
         ctrl.addWidget(self.btn_stop)
-        layout.addLayout(ctrl)
-        
+        ctrl.addStretch()
+        ctrl.addWidget(self.btn_test_notify)
+        ctrl.addWidget(self.btn_export)
+        root.addLayout(ctrl)
+
+        # ── Splitter: signal table + live log ───────────────────
+        splitter = QSplitter(Qt.Vertical)
+
+        # Signal table
+        sig_frame = QFrame()
+        sig_lay = QVBoxLayout(sig_frame)
+        sig_lay.setContentsMargins(0, 0, 0, 0)
+
+        tbl_hdr = QHBoxLayout()
+        tbl_hdr.addWidget(QLabel("📊 Signal Feed"))
+        self.lbl_sig_count = QLabel("0 signals")
+        self.lbl_sig_count.setStyleSheet("color:#888;")
+        tbl_hdr.addWidget(self.lbl_sig_count)
+        tbl_hdr.addStretch()
+        self.lbl_last_check = QLabel("Last checked: —")
+        self.lbl_last_check.setStyleSheet("color:#555; font-size:11px;")
+        tbl_hdr.addWidget(self.lbl_last_check)
+        sig_lay.addLayout(tbl_hdr)
+
+        self.sig_table = QTableWidget()
+        self.sig_table.setColumnCount(6)
+        self.sig_table.setHorizontalHeaderLabels([
+            "IST Time", "Direction", "Symbol", "Timeframe", "Price", "Conditions"
+        ])
+        self.sig_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.sig_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.sig_table.setAlternatingRowColors(True)
+        self.sig_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.sig_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.sig_table.cellClicked.connect(self._on_signal_selected)
+        sig_lay.addWidget(self.sig_table)
+        splitter.addWidget(sig_frame)
+
+        # Debug / log area
+        log_frame = QFrame()
+        log_lay = QVBoxLayout(log_frame)
+        log_lay.setContentsMargins(0, 0, 0, 0)
+        log_lay.addWidget(QLabel("📋 Activity Log"))
         self.log = QTextEdit()
         self.log.setReadOnly(True)
-        layout.addWidget(self.log)
-        
-        self.setLayout(layout)
-        
-        self.monitor.signal_generated.connect(self.on_signal)
-        
-    def load_strategy(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Open Strategy", "", "JSON Files (*.json)")
-        if filepath:
-            try:
-                with open(filepath, "r") as f:
-                    self.active_strategy = json.load(f)
-                self.strat_label.setText(f"Strategy: {self.active_strategy.get('name', 'Unknown')}")
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Could not load strategy: {e}")
+        self.log.setStyleSheet("font-family: monospace; font-size: 11px; color:#aaa;")
+        log_lay.addWidget(self.log)
+        splitter.addWidget(log_frame)
 
-    def start_monitoring(self):
-        if not self.active_strategy:
-            QMessageBox.warning(self, "Error", "Load a strategy first.")
+        splitter.setSizes([300, 180])
+        root.addWidget(splitter)
+
+        # ── Bottom: condition detail panel ───────────────────────
+        detail_frame = QGroupBox("SIGNAL DETAIL — click any row above")
+        detail_lay = QVBoxLayout(detail_frame)
+        self.lbl_detail = QLabel("Select a signal row to see the exact conditions that fired.")
+        self.lbl_detail.setWordWrap(True)
+        self.lbl_detail.setStyleSheet("color:#aaa; font-family:monospace;")
+        detail_lay.addWidget(self.lbl_detail)
+        root.addWidget(detail_frame)
+
+        # MT5 status refresh timer
+        self._status_timer = QTimer(self)
+        self._status_timer.timeout.connect(self._refresh_mt5_status)
+        self._status_timer.start(5000)
+        self._refresh_mt5_status()
+
+        # Store signal data for detail view
+        self._signals_data: list[dict] = []
+
+    # ── Strategy loading ─────────────────────────────────────────
+
+    def _load_strategy(self):
+        fp, _ = QFileDialog.getOpenFileName(
+            self, "Open Strategy JSON", "", "JSON Files (*.json)")
+        if not fp:
             return
-        self.monitor.start(self.active_strategy)
-        self.status.setText("Live Monitor: RUNNING")
-        self.status.setStyleSheet("color: green; font-size: 18px; font-weight: bold;")
+        try:
+            with open(fp) as f:
+                self.strategy = json.load(f)
+            name = self.strategy.get("name", "?")
+            sym = self.strategy.get("symbol", "XAUUSD")
+            tf = self.strategy.get("timeframe", "M15")
+            self.lbl_strat.setText(f"✅ {name}  ({sym} {tf})")
+            self.lbl_strat.setStyleSheet("color:#00d26a; font-weight:bold;")
+            self.cb_symbol.setCurrentText(sym)
+            self.cb_tf.setCurrentText(tf)
+            self._log(f"Strategy loaded: {name}")
+        except Exception as e:
+            QMessageBox.warning(self, "Load Error", str(e))
+
+    # ── Start / Stop ─────────────────────────────────────────────
+
+    def _start(self):
+        if not self.strategy:
+            QMessageBox.warning(self, "No Strategy", "Load a strategy JSON first.")
+            return
+        if not mt5_provider.is_connected():
+            if not mt5_provider.connect():
+                QMessageBox.critical(self, "MT5 Error",
+                    "Cannot connect to MT5. Make sure the terminal is running.")
+                return
+        self._refresh_mt5_status()
+
+        symbol = self.cb_symbol.currentText().strip()
+        timeframe = self.cb_tf.currentText()
+        interval = self.spin_interval.value()
+
+        self._worker = _MonitorWorker(self.strategy, symbol, timeframe, interval)
+        self._thread = QThread()
+        self._worker.moveToThread(self._thread)
+
+        self._thread.started.connect(self._worker.run)
+        self._worker.signal_found.connect(self._on_signal_found)
+        self._worker.status_update.connect(self._log)
+        self._worker.candle_checked.connect(self._on_candle_checked)
+        self._worker.error_occurred.connect(lambda e: self._log(f"❌ Error: {e}"))
+
+        self._thread.start()
+
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
-        self.log.append("Started monitoring...")
-        
-    def stop_monitoring(self):
-        self.monitor.stop()
-        self.status.setText("Live Monitor: STOPPED")
-        self.status.setStyleSheet("color: black; font-size: 18px; font-weight: bold;")
+        self.btn_load_strat.setEnabled(False)
+        self.lbl_status.setText(f"▶  MONITORING — {symbol} {timeframe}")
+        self.lbl_status.setStyleSheet("color:#00d26a; font-weight:bold;")
+        self._log(f"▶ Started monitoring {symbol} {timeframe} every {interval}s")
+
+    def _stop(self):
+        if self._worker:
+            self._worker.stop()
+        if self._thread:
+            self._thread.quit()
+            self._thread.wait(3000)
+        self._worker = None
+        self._thread = None
+
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
-        self.log.append("Stopped monitoring.")
-        
-    def on_signal(self, data):
-        sig = data["signal"]
-        sym = data["strategy"]["symbol"]
-        tf = data["strategy"]["timeframe"]
-        
-        title = f"{sig['direction']} CONDITIONS MET"
-        msg = f"{sym} {tf}\nPrice: {sig['price']}\nTime: {sig['timestamp']}\n"
-        for d in sig['debug']:
-            msg += f"- {d}\n"
-            
-        self.log.append(f"SIGNAL: {title}")
-        self.log.append(msg)
-        
-        # Desktop Alert
-        self.alerter.show_alert(title, msg)
+        self.btn_load_strat.setEnabled(True)
+        self.lbl_status.setText("⏹  MONITOR STOPPED")
+        self.lbl_status.setStyleSheet("color:#888; font-weight:bold;")
+        self._log("⏹ Monitoring stopped.")
+
+    # ── Signal handling ─────────────────────────────────────────
+
+    def _on_signal_found(self, sig: dict):
+        self._signal_count += 1
+        self.lbl_sig_count.setText(f"{self._signal_count} signal{'s' if self._signal_count != 1 else ''}")
+
+        direction = self.strategy.get("direction", "BUY")
+        symbol = self.cb_symbol.currentText()
+        timeframe = self.cb_tf.currentText()
+        price = sig.get("price", 0)
+        ts_ist = _ist(sig.get("timestamp", ""))
+        debug = sig.get("debug", [])
+
+        # Store for detail view
+        full_sig = {
+            "ts_ist": ts_ist,
+            "direction": direction,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "price": price,
+            "debug": debug,
+        }
+        self._signals_data.insert(0, full_sig)
+
+        # Add row to table (newest first)
+        row = 0
+        self.sig_table.insertRow(row)
+        color = QColor("#00d26a") if direction == "BUY" else QColor("#ff4757")
+        cells = [ts_ist, direction, symbol, timeframe, f"{price:,.5f}",
+                 " | ".join(debug[:2])]
+        for col, val in enumerate(cells):
+            item = QTableWidgetItem(str(val))
+            item.setTextAlignment(Qt.AlignCenter)
+            if col == 1:
+                item.setForeground(color)
+                item.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            self.sig_table.setItem(row, col, item)
+
+        self._log(f"🔔 SIGNAL: {direction} {symbol} {timeframe} @ {price:,.5f}")
+
+        # Desktop notification
+        if self.chk_notify.isChecked():
+            notifier.signal_alert(
+                strategy_name=self.strategy.get("name", "?"),
+                symbol=symbol,
+                timeframe=timeframe,
+                direction=direction,
+                price=price,
+                timestamp=ts_ist,
+                debug_lines=debug
+            )
+
+        # Persist to CSV log
+        self._append_signal_csv(full_sig)
+
+    def _on_candle_checked(self, info: dict):
+        self.lbl_last_check.setText(
+            f"Last checked: {info['time']}  |  "
+            f"{info['symbol']} {info['timeframe']}  close={info['close']:,.5f}"
+        )
+
+    def _on_signal_selected(self, row: int, _col: int):
+        if row < len(self._signals_data):
+            sig = self._signals_data[row]
+            lines = [
+                f"⏱  Time (IST): {sig['ts_ist']}",
+                f"📈 Direction:  {sig['direction']}",
+                f"💰 Price:      {sig['price']:,.5f}",
+                "",
+                "Condition Results:",
+            ]
+            for d in sig.get("debug", []):
+                lines.append(f"   ✓ {d}")
+            self.lbl_detail.setText("\n".join(lines))
+
+    # ── Helpers ─────────────────────────────────────────────────
+
+    def _refresh_mt5_status(self):
+        if mt5_provider.is_connected():
+            self.lbl_mt5.setText("MT5: ● Connected")
+            self.lbl_mt5.setStyleSheet("color:#00d26a; font-weight:bold;")
+        else:
+            self.lbl_mt5.setText("MT5: ○ Disconnected")
+            self.lbl_mt5.setStyleSheet("color:#ff4757; font-weight:bold;")
+
+    def _log(self, msg: str):
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log.append(f"[{ts}] {msg}")
+        # Auto-scroll
+        sb = self.log.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _test_notification(self):
+        notifier.signal_alert(
+            strategy_name="Test Strategy",
+            symbol="XAUUSD",
+            timeframe="M15",
+            direction="BUY",
+            price=2498.50,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
+            debug_lines=["close[0](2498.50) > close[1](2496.20)", "RSI(14) = 57.3 > 50"]
+        )
+        self._log("🔔 Test notification sent — check your taskbar!")
+
+    def _append_signal_csv(self, sig: dict):
+        try:
+            self._signal_log_path.parent.mkdir(parents=True, exist_ok=True)
+            write_header = not self._signal_log_path.exists()
+            with open(self._signal_log_path, "a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=[
+                    "ts_ist", "direction", "symbol", "timeframe", "price", "conditions"])
+                if write_header:
+                    writer.writeheader()
+                writer.writerow({
+                    "ts_ist": sig["ts_ist"],
+                    "direction": sig["direction"],
+                    "symbol": sig["symbol"],
+                    "timeframe": sig["timeframe"],
+                    "price": sig["price"],
+                    "conditions": " | ".join(sig.get("debug", []))
+                })
+        except Exception as e:
+            logger.error(f"Failed to write signal CSV: {e}")
+
+    def _export_signals(self):
+        if not self._signals_data:
+            QMessageBox.information(self, "No Signals", "No signals to export yet.")
+            return
+        fp, _ = QFileDialog.getSaveFileName(
+            self, "Export Signals", "live_signals.csv", "CSV Files (*.csv)")
+        if not fp:
+            return
+        try:
+            with open(fp, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=[
+                    "ts_ist", "direction", "symbol", "timeframe", "price", "conditions"])
+                writer.writeheader()
+                for sig in self._signals_data:
+                    writer.writerow({
+                        "ts_ist": sig["ts_ist"],
+                        "direction": sig["direction"],
+                        "symbol": sig["symbol"],
+                        "timeframe": sig["timeframe"],
+                        "price": sig["price"],
+                        "conditions": " | ".join(sig.get("debug", []))
+                    })
+            QMessageBox.information(self, "Exported", f"Saved to:\n{fp}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))

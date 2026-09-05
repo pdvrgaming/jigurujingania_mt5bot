@@ -4,3 +4,6 @@ numpy
 MetaTrader5
 pytest
 pyinstaller
+pytz
+winotify
+plyer
