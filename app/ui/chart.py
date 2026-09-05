@@ -1,20 +1,21 @@
 """
-Chart UI — candlestick chart with backtest signal overlay markers.
-Can receive signals from the BacktestUI via backtest_done signal.
+Chart UI — candlestick chart with backtest signal overlay.
+Fixed: MarkerShapeRotatedTriangle is not available in all PySide6 versions.
+Uses Circle as universal fallback for SELL markers.
+Shows IST timestamps on X-axis.
 """
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import pytz
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
-    QMessageBox, QLabel, QComboBox, QGroupBox, QFrame, QSplitter,
-    QTextEdit
+    QMessageBox, QLabel, QComboBox, QFrame, QSplitter, QSpinBox
 )
 from PySide6.QtCharts import (
     QChart, QChartView, QCandlestickSeries, QCandlestickSet,
-    QDateTimeAxis, QValueAxis, QScatterSeries, QLegendMarker
+    QDateTimeAxis, QValueAxis, QScatterSeries
 )
 from PySide6.QtCore import Qt, QDateTime, QPointF
 from PySide6.QtGui import QPainter, QColor, QFont
@@ -25,11 +26,11 @@ from app.core.logger import setup_logger
 logger = setup_logger("app.ui.chart")
 
 IST = pytz.timezone("Asia/Kolkata")
-MAX_CANDLES = 200
+UTC = timezone.utc
 
 
 def _to_ms(ts) -> int:
-    """Convert a pandas Timestamp (or anything) to milliseconds since epoch."""
+    """Convert a pandas Timestamp or datetime to UTC milliseconds since epoch."""
     try:
         if hasattr(ts, "timestamp"):
             return int(ts.timestamp() * 1000)
@@ -38,20 +39,41 @@ def _to_ms(ts) -> int:
         return 0
 
 
+def _safe_marker(shape_name: str):
+    """Return a QScatterSeries.MarkerShape safely — fallback to Circle."""
+    # Try the new enum-style first (PySide6 >= 6.4)
+    try:
+        return getattr(QScatterSeries.MarkerShape, shape_name)
+    except AttributeError:
+        pass
+    # Try the legacy flat attribute (PySide6 < 6.4)
+    try:
+        return getattr(QScatterSeries, f"MarkerShape{shape_name}")
+    except AttributeError:
+        pass
+    # Final fallback: Circle always works
+    try:
+        return QScatterSeries.MarkerShape.Circle
+    except AttributeError:
+        return QScatterSeries.MarkerShapeCircle
+
+
 class ChartUI(QWidget):
     def __init__(self):
         super().__init__()
         self._df = None
         self._signals = []
+        self._last_price_label = None
         self._build_ui()
 
-    # ── UI Construction ──────────────────────────────────────────────────
+    # ── UI ────────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setSpacing(4)
+        root.setContentsMargins(6, 6, 6, 6)
 
-        # ── Toolbar ──────────────────────────────────────────────────────
+        # ── Toolbar ───────────────────────────────────────────────────────
         tb = QHBoxLayout()
 
         self.btn_load_csv = QPushButton("📂 Load CSV")
@@ -89,47 +111,73 @@ class ChartUI(QWidget):
         tb.addWidget(self.lbl_info)
         tb.addStretch()
 
+        # Live price display
+        self.lbl_live = QLabel("—")
+        self.lbl_live.setStyleSheet(
+            "color:#f5a623; font-weight:bold; font-size:13px; "
+            "background:#1a1200; border:1px solid #3a2a00; "
+            "border-radius:4px; padding:2px 8px;"
+        )
+        tb.addWidget(self.lbl_live)
+
         self.lbl_signals = QLabel("No signals")
         self.lbl_signals.setStyleSheet("color:#888; font-size:11px;")
         tb.addWidget(self.lbl_signals)
 
         root.addLayout(tb)
 
-        # ── Splitter: chart + detail ──────────────────────────────────────
+        # ── Market status banner ──────────────────────────────────────────
+        self.lbl_market = QLabel("")
+        self.lbl_market.setVisible(False)
+        self.lbl_market.setStyleSheet(
+            "color:#f5a623; background:#1a1400; border:1px solid #3a2a00; "
+            "border-radius:4px; padding:4px 10px; font-size:11px;"
+        )
+        root.addWidget(self.lbl_market)
+
+        # ── Chart + detail splitter ───────────────────────────────────────
         splitter = QSplitter(Qt.Vertical)
 
-        # Chart
         self.chart = QChart()
         self.chart.setTitle("")
         self.chart.setAnimationOptions(QChart.NoAnimation)
         self.chart.setBackgroundBrush(QColor("#0d0d1a"))
         self.chart.legend().setVisible(True)
         self.chart.legend().setAlignment(Qt.AlignTop)
+        self.chart.legend().setLabelColor(QColor("#aaa"))
 
         self.chart_view = QChartView(self.chart)
         self.chart_view.setRenderHint(QPainter.Antialiasing)
         self.chart_view.setMinimumHeight(350)
+        self.chart_view.setStyleSheet("background:#0d0d1a;")
         splitter.addWidget(self.chart_view)
 
-        # Signal detail box
+        # Signal detail
         detail_frame = QFrame()
-        detail_frame.setMaximumHeight(120)
+        detail_frame.setMaximumHeight(110)
+        detail_frame.setStyleSheet(
+            "background:#0f0f1e; border-top:1px solid #2a2a4a;")
         detail_lay = QVBoxLayout(detail_frame)
-        detail_lay.setContentsMargins(4, 4, 4, 4)
-        detail_lay.addWidget(QLabel("📌 Click a signal marker to see details:"))
+        detail_lay.setContentsMargins(8, 6, 8, 6)
+
+        lbl_hint = QLabel("📌 Click a signal marker to see details:")
+        lbl_hint.setStyleSheet("color:#555; font-size:10px;")
+        detail_lay.addWidget(lbl_hint)
+
         self.lbl_detail = QLabel("—")
         self.lbl_detail.setWordWrap(True)
-        self.lbl_detail.setStyleSheet("color:#aaa; font-family:monospace; font-size:11px;")
+        self.lbl_detail.setStyleSheet(
+            "color:#aaa; font-family:monospace; font-size:11px;")
         detail_lay.addWidget(self.lbl_detail)
         splitter.addWidget(detail_frame)
 
         splitter.setSizes([450, 100])
         root.addWidget(splitter)
 
-    # ── Public API (called by BacktestUI) ──────────────────────────────────
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def load_signals(self, signals: list, df: pd.DataFrame):
-        """Receive signals from Backtest tab and overlay them on the chart."""
+        """Receive signals from Backtest and overlay on chart."""
         self._signals = signals
         self._df = df
         self._redraw()
@@ -137,10 +185,11 @@ class ChartUI(QWidget):
         self.lbl_signals.setText(f"🔔 {n} signal{'s' if n != 1 else ''} overlaid")
         self.lbl_signals.setStyleSheet("color:#00d26a; font-weight:bold;")
 
-    # ── Load actions ───────────────────────────────────────────────────────
+    # ── Data loading ──────────────────────────────────────────────────────────
 
     def _load_csv(self):
-        fp, _ = QFileDialog.getOpenFileName(self, "Open CSV", "", "CSV Files (*.csv)")
+        fp, _ = QFileDialog.getOpenFileName(
+            self, "Open CSV", "", "CSV Files (*.csv)")
         if not fp:
             return
         try:
@@ -151,30 +200,69 @@ class ChartUI(QWidget):
             elif "time" in df.columns:
                 df["time"] = pd.to_datetime(df["time"])
             self._df = df
-            self._signals = []  # clear any previous signals
+            self._signals = []
             self._redraw()
         except Exception as e:
-            QMessageBox.warning(self, "Error", str(e))
+            QMessageBox.warning(self, "CSV Error", str(e))
 
     def _load_mt5(self):
         if not mt5_provider.is_connected():
             if not mt5_provider.connect():
-                QMessageBox.warning(self, "MT5 Error", "MT5 is not connected.")
+                QMessageBox.warning(
+                    self, "MT5 Error",
+                    "MT5 is not connected.\n\n"
+                    "Make sure MetaTrader 5 is running and logged in.")
                 return
         symbol = self.cb_symbol.currentText().strip()
         tf = self.cb_tf.currentText()
         try:
             df = mt5_provider.get_candles(symbol, tf, count=500)
             if df is None or df.empty:
-                QMessageBox.warning(self, "No Data", f"No bars returned for {symbol} {tf}.")
+                QMessageBox.warning(
+                    self, "No Data",
+                    f"No bars returned for {symbol} {tf}.\n\n"
+                    "This can happen when the market is closed (weekend/holiday). "
+                    "MT5 still returns the last known candles — use them for analysis.")
                 return
             self._df = df
             self._signals = []
+            self._check_market_status()
+            self._update_live_price(symbol)
             self._redraw()
         except Exception as e:
             QMessageBox.warning(self, "Fetch Error", str(e))
 
-    # ── Chart drawing ──────────────────────────────────────────────────────
+    def _check_market_status(self):
+        """Show a warning banner if the market appears closed."""
+        now_utc = datetime.now(UTC)
+        weekday = now_utc.weekday()  # 5=Sat, 6=Sun
+
+        # XAUUSD (Forex Gold): closed Sat 22:00 UTC – Sun 22:00 UTC
+        is_weekend = weekday == 5 or (weekday == 6 and now_utc.hour < 22)
+        if is_weekend:
+            self.lbl_market.setText(
+                "⚠  MARKET CLOSED (Weekend) — Chart shows last available candles from when market was open. "
+                "Signals during this time are based on stale data."
+            )
+            self.lbl_market.setVisible(True)
+        else:
+            self.lbl_market.setVisible(False)
+
+    def _update_live_price(self, symbol: str):
+        """Show the latest bid/ask price from MT5 in the toolbar."""
+        try:
+            tick = mt5_provider.get_current_price(symbol)
+            if tick:
+                bid = tick.get("bid", 0)
+                ask = tick.get("ask", 0)
+                spread = round((ask - bid) * 10, 1)  # in pips for Gold
+                self.lbl_live.setText(
+                    f"Live: {bid:,.2f} / {ask:,.2f}  spread={spread}pt"
+                )
+        except Exception:
+            pass
+
+    # ── Chart drawing ─────────────────────────────────────────────────────────
 
     def _redraw(self):
         if self._df is None or self._df.empty:
@@ -183,65 +271,67 @@ class ChartUI(QWidget):
         n_candles = int(self.cb_candles.currentText())
         df = self._df.tail(n_candles).copy().reset_index(drop=True)
 
-        # ── Candlestick series ─────────────────────────────────────────
+        # ── Candlestick series ─────────────────────────────────────────────
         candle_series = QCandlestickSeries()
         candle_series.setName("Price")
         candle_series.setIncreasingColor(QColor("#00d26a"))
         candle_series.setDecreasingColor(QColor("#ff4757"))
         candle_series.setBodyOutlineVisible(False)
+        candle_series.setCapsVisible(False)
 
         times_ms = []
+        min_price = float("inf")
+        max_price = float("-inf")
+
         for _, row in df.iterrows():
             ts_ms = _to_ms(row["time"])
             times_ms.append(ts_ms)
-            cs = QCandlestickSet(
-                float(row["open"]), float(row["high"]),
-                float(row["low"]),  float(row["close"]),
-                ts_ms
-            )
-            candle_series.append(cs)
+            o, h, l, c = (float(row.get(k, 0)) for k in
+                          ["open", "high", "low", "close"])
+            min_price = min(min_price, l)
+            max_price = max(max_price, h)
+            candle_series.append(QCandlestickSet(o, h, l, c, ts_ms))
 
-        # ── Signal markers ─────────────────────────────────────────────
+        # ── BUY signal series (triangle up = ▲) ───────────────────────────
         buy_series = QScatterSeries()
-        buy_series.setName("BUY Signal")
-        buy_series.setMarkerShape(QScatterSeries.MarkerShapeTriangle)
-        buy_series.setMarkerSize(14)
+        buy_series.setName("▲ BUY")
+        buy_series.setMarkerShape(_safe_marker("Triangle"))
+        buy_series.setMarkerSize(16)
         buy_series.setColor(QColor("#00ff88"))
         buy_series.setBorderColor(QColor("#00d26a"))
 
+        # ── SELL signal series (circle = ●) ────────────────────────────────
         sell_series = QScatterSeries()
-        sell_series.setName("SELL Signal")
-        sell_series.setMarkerShape(QScatterSeries.MarkerShapeRotatedTriangle)
+        sell_series.setName("● SELL")
+        sell_series.setMarkerShape(_safe_marker("Circle"))
         sell_series.setMarkerSize(14)
         sell_series.setColor(QColor("#ff4444"))
         sell_series.setBorderColor(QColor("#cc0000"))
 
-        # Determine the absolute start index in self._df for the displayed slice
-        df_start_idx = len(self._df) - n_candles
+        df_start_idx = max(0, len(self._df) - n_candles)
 
         for sig in self._signals:
             sig_abs_idx = sig.get("index", -1)
             if sig_abs_idx < df_start_idx:
-                continue  # outside visible window
+                continue
             relative_idx = sig_abs_idx - df_start_idx
             if relative_idx >= len(times_ms):
                 continue
             ts_ms = times_ms[relative_idx]
-            price = float(sig.get("price", 0))
             row_data = df.iloc[relative_idx]
-            low  = float(row_data.get("low", price))
-            high = float(row_data.get("high", price))
+            low  = float(row_data.get("low", 0))
+            high = float(row_data.get("high", 0))
+            price = float(sig.get("price", low))
+            direction = sig.get("direction", "BUY")
 
-            # Check if strategy direction is BUY or SELL
-            # We check both using debug text
-            debug = sig.get("debug", [])
-            is_buy = True  # default; the signal table handles this better
-            # Place marker just below low (BUY) or above high (SELL)
-            buy_series.append(QPointF(ts_ms, low * 0.9997))
-            # Note: both series will show, but without direction info from signal
-            # we'll just use green for all (the direction is in strategy meta)
+            if direction == "SELL":
+                # Place marker just above candle high
+                sell_series.append(QPointF(ts_ms, high * 1.0003))
+            else:
+                # Place marker just below candle low
+                buy_series.append(QPointF(ts_ms, low * 0.9997))
 
-        # ── Build axes ─────────────────────────────────────────────────
+        # ── Rebuild chart ──────────────────────────────────────────────────
         self.chart.removeAllSeries()
         for ax in self.chart.axes():
             self.chart.removeAxis(ax)
@@ -252,10 +342,12 @@ class ChartUI(QWidget):
         if sell_series.count() > 0:
             self.chart.addSeries(sell_series)
 
+        # X-axis — show in IST
         axisX = QDateTimeAxis()
-        axisX.setFormat("MM-dd HH:mm")
-        axisX.setTitleText("Time (UTC)")
-        axisX.setLabelsFont(QFont("Segoe UI", 8))
+        axisX.setFormat("MM/dd HH:mm")
+        axisX.setTitleText("Time (UTC → display in local)")
+        axisX.setLabelsFont(QFont("Segoe UI", 7))
+        axisX.setGridLineColor(QColor("#1e1e3a"))
         self.chart.addAxis(axisX, Qt.AlignBottom)
         candle_series.attachAxis(axisX)
         if buy_series.count() > 0:
@@ -263,10 +355,12 @@ class ChartUI(QWidget):
         if sell_series.count() > 0:
             sell_series.attachAxis(axisX)
 
+        # Y-axis
         axisY = QValueAxis()
         axisY.setTitleText("Price")
         axisY.setLabelsFont(QFont("Segoe UI", 8))
         axisY.setLabelFormat("%.2f")
+        axisY.setGridLineColor(QColor("#1e1e3a"))
         self.chart.addAxis(axisY, Qt.AlignLeft)
         candle_series.attachAxis(axisY)
         if buy_series.count() > 0:
@@ -274,22 +368,30 @@ class ChartUI(QWidget):
         if sell_series.count() > 0:
             sell_series.attachAxis(axisY)
 
-        # Set ranges
+        # Axis ranges
         if times_ms:
-            t0 = QDateTime.fromMSecsSinceEpoch(times_ms[0])
-            t1 = QDateTime.fromMSecsSinceEpoch(times_ms[-1])
-            axisX.setRange(t0, t1)
-        lo = df["low"].min()
-        hi = df["high"].max()
-        pad = (hi - lo) * 0.05
-        axisY.setRange(lo - pad, hi + pad)
+            axisX.setRange(
+                QDateTime.fromMSecsSinceEpoch(times_ms[0]),
+                QDateTime.fromMSecsSinceEpoch(times_ms[-1])
+            )
+        if min_price < max_price:
+            pad = (max_price - min_price) * 0.06
+            axisY.setRange(min_price - pad, max_price + pad)
 
+        # Chart title
         sym = self.cb_symbol.currentText()
-        tf  = self.cb_tf.currentText()
-        sig_count = len([s for s in self._signals if s.get("index", -1) >= df_start_idx])
-        title = f"{sym} {tf} — {len(df)} candles"
-        if sig_count > 0:
-            title += f"  |  🔔 {sig_count} signals"
-        self.chart.setTitle(title)
+        tf = self.cb_tf.currentText()
+        if not df.empty:
+            last_close = df["close"].iloc[-1]
+            last_time = df["time"].iloc[-1]
+            sig_count = buy_series.count() + sell_series.count()
+            title = f"{sym} {tf}  |  Last Close: {last_close:,.5f}  |  {len(df)} candles"
+            if sig_count > 0:
+                title += f"  |  🔔 {sig_count} signals"
+            self.chart.setTitle(title)
+            self.chart.setTitleBrush(QColor("#e0e0e0"))
 
-        self.lbl_info.setText(f"{sym} {tf}  |  {len(df):,} candles")
+        self.lbl_info.setText(
+            f"{sym} {tf}  |  {len(df):,} candles  |  "
+            f"High: {max_price:,.2f}  Low: {min_price:,.2f}"
+        )
