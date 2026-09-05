@@ -70,6 +70,7 @@ class _MonitorWorker(QObject):
 
     def run(self):
         self._running = True
+        self._was_connected = False
         self.status_update.emit("▶ Monitoring started…")
         while self._running:
             try:
@@ -89,8 +90,19 @@ class _MonitorWorker(QObject):
         if not mt5_provider.is_connected():
             mt5_provider.connect()
             if not mt5_provider.is_connected():
-                self.status_update.emit("⚠ MT5 disconnected — retrying…")
+                if self._was_connected:
+                    # First time we notice disconnect — log it
+                    self.status_update.emit("🔴 MT5_DISCONNECTED — retrying every cycle…")
+                    self._was_connected = False
+                else:
+                    self.status_update.emit("⚠ MT5 still disconnected — waiting…")
                 return
+            else:
+                # Just reconnected
+                self.status_update.emit("🟢 MT5_RECONNECTED — resuming monitoring.")
+                self._was_connected = True
+        elif not self._was_connected:
+            self._was_connected = True
 
         # Fetch the last 100 closed candles
         df = mt5_provider.get_candles(self.symbol, self.timeframe, count=100)
@@ -141,6 +153,7 @@ class LiveMonitorUI(QWidget):
         self._worker = None
         self._thread = None
         self._signal_count = 0
+        self._journal_tab = None   # injected by MainWindow
         self._signal_log_path = Path(
             config.get("data_directory", "data")) / "live_signals.csv"
 
@@ -431,6 +444,21 @@ class LiveMonitorUI(QWidget):
                 timestamp=ts_ist,
                 debug_lines=debug
             )
+
+        # Auto-record in Signal Journal
+        if self._journal_tab is not None:
+            try:
+                self._journal_tab.add_signal(
+                    strategy_name=self.strategy.get("name", "?"),
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    direction=direction,
+                    price=price,
+                    timestamp_ist=ts_ist,
+                    conditions=debug
+                )
+            except Exception as je:
+                logger.error(f"Journal add_signal failed: {je}")
 
         # Persist to CSV log
         self._append_signal_csv(full_sig)
