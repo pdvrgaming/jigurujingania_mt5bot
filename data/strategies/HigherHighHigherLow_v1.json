@@ -1,0 +1,52 @@
+{
+  "name": "HigherHighHigherLow",
+  "version": 1,
+  "symbol": "XAUUSD",
+  "timeframe": "H1",
+  "direction": "BUY",
+  "description": "SMC Market Structure: BUY when price forms Higher High and Higher Low.\nRule 1: current high > previous high (HH)\nRule 2: current low  > previous low  (HL)\nRule 3: current close > current open (bullish close confirms)",
+  "conditions": {
+    "operator": "AND",
+    "rules": [
+      {
+        "left": {
+          "type": "price",
+          "field": "high",
+          "period": 0
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "high",
+          "period": 1
+        }
+      },
+      {
+        "left": {
+          "type": "price",
+          "field": "low",
+          "period": 0
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "low",
+          "period": 1
+        }
+      },
+      {
+        "left": {
+          "type": "price",
+          "field": "close",
+          "period": 0
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "open",
+          "period": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "name": "InsideBarBreakoutBuy",
+  "version": 1,
+  "symbol": "XAUUSD",
+  "timeframe": "M15",
+  "direction": "BUY",
+  "description": "Price Action: An inside bar is followed by a bullish breakout.\nBar 2 ago (period=2): Mother bar (large range)\nBar 1 ago (period=1): Inside bar (high < mother high, low > mother low)\nCurrent bar (period=0): Breaks above mother bar's high\n",
+  "conditions": {
+    "operator": "AND",
+    "rules": [
+      {
+        "left": {
+          "type": "price",
+          "field": "high",
+          "period": 1
+        },
+        "operator": "<",
+        "right": {
+          "type": "price",
+          "field": "high",
+          "period": 2
+        }
+      },
+      {
+        "left": {
+          "type": "price",
+          "field": "low",
+          "period": 1
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "low",
+          "period": 2
+        }
+      },
+      {
+        "left": {
+          "type": "price",
+          "field": "close",
+          "period": 0
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "high",
+          "period": 2
+        }
+      }
+    ]
+  }
+}

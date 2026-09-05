@@ -1,0 +1,52 @@
+{
+  "name": "BullishEngulfing",
+  "version": 1,
+  "symbol": "XAUUSD",
+  "timeframe": "M15",
+  "direction": "BUY",
+  "description": "Price Action: Bullish engulfing pattern.\nRule 1: Current candle is bullish (close > open)\nRule 2: Previous candle was bearish (prev close < prev open)\nRule 3: Current close > previous open (engulfs prev body)",
+  "conditions": {
+    "operator": "AND",
+    "rules": [
+      {
+        "left": {
+          "type": "price",
+          "field": "close",
+          "period": 0
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "open",
+          "period": 0
+        }
+      },
+      {
+        "left": {
+          "type": "price",
+          "field": "close",
+          "period": 1
+        },
+        "operator": "<",
+        "right": {
+          "type": "price",
+          "field": "open",
+          "period": 1
+        }
+      },
+      {
+        "left": {
+          "type": "price",
+          "field": "close",
+          "period": 0
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "open",
+          "period": 1
+        }
+      }
+    ]
+  }
+}

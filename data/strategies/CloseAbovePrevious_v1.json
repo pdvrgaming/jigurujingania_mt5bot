@@ -1,0 +1,26 @@
+{
+  "name": "CloseAbovePrevious",
+  "version": 1,
+  "symbol": "XAUUSD",
+  "timeframe": "M1",
+  "direction": "BUY",
+  "description": "Buy when current candle close is above previous candle close. Simple momentum filter.",
+  "conditions": {
+    "operator": "AND",
+    "rules": [
+      {
+        "left": {
+          "type": "price",
+          "field": "close",
+          "period": 0
+        },
+        "operator": ">",
+        "right": {
+          "type": "price",
+          "field": "close",
+          "period": 1
+        }
+      }
+    ]
+  }
+}
