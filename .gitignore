@@ -1,0 +1,28 @@
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller
+build/
+dist/
+release/
+*.spec
+
+# Data and logs
+data/observations/
+logs/
+*.csv
+*.log
+
+# pytest
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/

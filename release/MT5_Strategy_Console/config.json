@@ -1,7 +1,0 @@
-{
-    "mt5_default_symbol": "XAUUSD",
-    "mt5_default_timeframe": "M15",
-    "polling_interval_ms": 5000,
-    "data_directory": "data",
-    "log_directory": "logs"
-}
