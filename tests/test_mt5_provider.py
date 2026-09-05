@@ -51,3 +51,41 @@ def test_mt5_provider_get_candles(mock_mt5):
     assert not df.empty
     assert 'time' in df.columns
     assert len(df) == 1
+
+@patch("app.core.mt5_provider.mt5")
+def test_mt5_provider_get_historical_rates(mock_mt5):
+    import numpy as np
+    from datetime import datetime, timezone, timedelta
+    mock_data = np.array([
+        (1672531200, 1800.0, 1805.0, 1795.0, 1802.0, 100, 1, 0),
+        (1672534800, 1802.0, 1810.0, 1800.0, 1808.0, 150, 1, 0)
+    ], dtype=[('time', 'i8'), ('open', 'f8'), ('high', 'f8'), ('low', 'f8'), ('close', 'f8'), ('tick_volume', 'i8'), ('spread', 'i4'), ('real_volume', 'i8')])
+    mock_mt5.copy_rates_range.return_value = mock_data
+    
+    provider = MT5Provider()
+    provider.connected = True
+    
+    start_dt = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    end_dt = datetime(2023, 1, 2, tzinfo=timezone.utc)
+    df = provider.get_historical_rates("XAUUSD", "H1", start_dt, end_dt)
+    
+    assert not df.empty
+    assert len(df) == 2
+    mock_mt5.copy_rates_range.assert_called_once()
+
+@patch("app.core.mt5_provider.mt5")
+def test_mt5_provider_get_recent_rates(mock_mt5):
+    import numpy as np
+    mock_data = np.array([
+        (1672531200, 1800.0, 1805.0, 1795.0, 1802.0, 100, 1, 0)
+    ], dtype=[('time', 'i8'), ('open', 'f8'), ('high', 'f8'), ('low', 'f8'), ('close', 'f8'), ('tick_volume', 'i8'), ('spread', 'i4'), ('real_volume', 'i8')])
+    mock_mt5.copy_rates_range.return_value = mock_data
+    
+    provider = MT5Provider()
+    provider.connected = True
+    
+    df = provider.get_recent_rates("XAUUSD", "D1", 5)
+    
+    assert not df.empty
+    assert len(df) == 1
+    mock_mt5.copy_rates_range.assert_called_once()

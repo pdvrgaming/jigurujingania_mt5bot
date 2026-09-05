@@ -1,5 +1,6 @@
 import MetaTrader5 as mt5
 import pandas as pd
+from datetime import datetime, timezone, timedelta
 from app.core.logger import setup_logger
 
 logger = setup_logger("app.core.mt5_provider")
@@ -57,6 +58,40 @@ class MT5Provider:
         df = pd.DataFrame(rates)
         df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
         return df
+
+    def get_historical_rates(self, symbol: str, timeframe: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+        if not self.connected:
+            return pd.DataFrame()
+
+        tf_map = {
+            "M1": mt5.TIMEFRAME_M1,
+            "M5": mt5.TIMEFRAME_M5,
+            "M15": mt5.TIMEFRAME_M15,
+            "M30": mt5.TIMEFRAME_M30,
+            "H1": mt5.TIMEFRAME_H1,
+            "H4": mt5.TIMEFRAME_H4,
+            "D1": mt5.TIMEFRAME_D1,
+        }
+        tf = tf_map.get(timeframe, mt5.TIMEFRAME_M15)
+
+        # MT5 expects naive datetime objects or aware datetime in UTC, but to be safe, 
+        # it's usually best to use naive datetime objects that represent UTC time in mt5 python api.
+        # But copy_rates_range is flexible enough if you pass aware datetimes or use explicit timestamps.
+        # However, passing int timestamp is safest.
+        rates = mt5.copy_rates_range(symbol, tf, start_dt, end_dt)
+        if rates is None or len(rates) == 0:
+            logger.error(f"Failed to get historical rates for {symbol}, error code = {mt5.last_error()}")
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
+        return df
+
+    def get_recent_rates(self, symbol: str, timeframe: str, days: int) -> pd.DataFrame:
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(days=days)
+        return self.get_historical_rates(symbol, timeframe, start_dt, end_dt)
+
 
     def get_current_price(self, symbol: str) -> dict:
         if not self.connected:
