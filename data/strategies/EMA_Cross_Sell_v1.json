@@ -1,0 +1,25 @@
+{
+    "name": "EMA_Cross_Sell",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "M15",
+    "direction": "SELL",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {
+                "left": {
+                    "type": "indicator",
+                    "name": "EMA",
+                    "period": 9
+                },
+                "operator": "<",
+                "right": {
+                    "type": "indicator",
+                    "name": "EMA",
+                    "period": 21
+                }
+            }
+        ]
+    }
+}

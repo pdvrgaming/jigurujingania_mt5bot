@@ -1,0 +1,36 @@
+{
+    "name": "Mean_Reversion_Buy",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "M5",
+    "direction": "BUY",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {
+                "left": {
+                    "type": "price",
+                    "name": "close"
+                },
+                "operator": "<",
+                "right": {
+                    "type": "indicator",
+                    "name": "SMA",
+                    "period": 200
+                }
+            },
+            {
+                "left": {
+                    "type": "indicator",
+                    "name": "RSI",
+                    "period": 14
+                },
+                "operator": "<",
+                "right": {
+                    "type": "constant",
+                    "value": 25.0
+                }
+            }
+        ]
+    }
+}

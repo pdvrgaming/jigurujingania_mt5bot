@@ -1,0 +1,23 @@
+{
+    "name": "Breakout_High_Buy",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "H1",
+    "direction": "BUY",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {
+                "left": {
+                    "type": "price",
+                    "name": "close"
+                },
+                "operator": ">",
+                "right": {
+                    "type": "price",
+                    "name": "high"
+                }
+            }
+        ]
+    }
+}

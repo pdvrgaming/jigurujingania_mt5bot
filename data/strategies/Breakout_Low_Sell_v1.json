@@ -1,0 +1,23 @@
+{
+    "name": "Breakout_Low_Sell",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "H1",
+    "direction": "SELL",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {
+                "left": {
+                    "type": "price",
+                    "name": "close"
+                },
+                "operator": "<",
+                "right": {
+                    "type": "price",
+                    "name": "low"
+                }
+            }
+        ]
+    }
+}

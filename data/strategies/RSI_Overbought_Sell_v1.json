@@ -1,0 +1,35 @@
+{
+    "name": "RSI_Overbought_Sell",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "M15",
+    "direction": "SELL",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {
+                "left": {
+                    "type": "indicator",
+                    "name": "RSI",
+                    "period": 14
+                },
+                "operator": ">",
+                "right": {
+                    "type": "constant",
+                    "value": 70.0
+                }
+            },
+            {
+                "left": {
+                    "type": "price",
+                    "name": "close"
+                },
+                "operator": "<",
+                "right": {
+                    "type": "price",
+                    "name": "open"
+                }
+            }
+        ]
+    }
+}

@@ -1,0 +1,50 @@
+2026-09-04 23:40:44,117 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-04 23:40:44,121 - app.core.mt5_provider - INFO - MT5 disconnected.
+2026-09-04 23:47:09,691 - app.core.historical_data - INFO - Exporting 1 M15 candles for XAUUSD...
+2026-09-04 23:47:09,731 - app.core.historical_data - INFO - Exported 1 candles to C:\Users\PDVR gaming\AppData\Local\Temp\pytest-of-PDVRgaming\pytest-0\test_export_candles0\XAUUSD_M15.csv
+2026-09-04 23:47:09,753 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-04 23:47:09,754 - app.core.mt5_provider - INFO - MT5 disconnected.
+2026-09-04 23:55:41,541 - app.core.bot_observer - INFO - Establishing baseline for Bot Observer...
+2026-09-04 23:55:41,543 - app.core.bot_observer - INFO - OBSERVED: PRICE_SNAPSHOT - {'current_price': 1800.0}
+2026-09-04 23:55:41,545 - app.core.bot_observer - INFO - OBSERVED: POSITION_OPENED - {'ticket': 12345, 'position_id': 12345, 'direction': 'BUY', 'volume': 1.0, 'price': 1800.0, 'sl': 1790.0, 'tp': 1820.0, 'current_price': 1801.0, 'profit': 100.0, 'swap': 0.0, 'magic': 999, 'comment': 'EA'}
+2026-09-05 09:52:53,271 - app.core.bot_observer - INFO - Establishing baseline for Bot Observer...
+2026-09-05 09:52:53,272 - app.core.bot_observer - INFO - OBSERVED: PRICE_SNAPSHOT - {'current_price': 1800.0}
+2026-09-05 09:52:53,273 - app.core.bot_observer - INFO - OBSERVED: POSITION_OPENED - {'ticket': 12345, 'position_id': 12345, 'direction': 'BUY', 'volume': 1.0, 'price': 1800.0, 'sl': 1790.0, 'tp': 1820.0, 'current_price': 1801.0, 'profit': 100.0, 'swap': 0.0, 'magic': 999, 'comment': 'EA'}
+2026-09-05 09:52:53,300 - app.core.historical_data - INFO - Exporting 1 M15 candles for XAUUSD...
+2026-09-05 09:52:53,306 - app.core.historical_data - INFO - Exported 1 candles to C:\Users\PDVR gaming\AppData\Local\Temp\pytest-of-PDVRgaming\pytest-2\test_export_candles0\XAUUSD_M15.csv
+2026-09-05 09:52:53,322 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-05 09:52:53,325 - app.core.mt5_provider - INFO - MT5 disconnected.
+2026-09-05 10:04:20,390 - app.main - INFO - Starting MT5 Strategy Console...
+2026-09-05 10:04:20,427 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-05 10:04:20,483 - app.ui.main_window - DEBUG - MainWindow initialized.
+2026-09-05 10:25:29,438 - app.core.bot_observer - INFO - Establishing baseline for Bot Observer...
+2026-09-05 10:25:29,439 - app.core.bot_observer - INFO - OBSERVED: PRICE_SNAPSHOT - {'current_price': 1800.0}
+2026-09-05 10:25:29,439 - app.core.bot_observer - INFO - OBSERVED: POSITION_OPENED - {'ticket': 12345, 'position_id': 12345, 'direction': 'BUY', 'volume': 1.0, 'price': 1800.0, 'sl': 1790.0, 'tp': 1820.0, 'current_price': 1801.0, 'profit': 100.0, 'swap': 0.0, 'magic': 999, 'comment': 'EA'}
+2026-09-05 10:25:29,461 - app.core.historical_data - INFO - Exporting 1 M15 candles for XAUUSD...
+2026-09-05 10:25:29,465 - app.core.historical_data - INFO - Exported 1 candles to C:\Users\PDVR gaming\AppData\Local\Temp\pytest-of-PDVRgaming\pytest-3\test_export_candles0\XAUUSD_M15.csv
+2026-09-05 10:25:29,477 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-05 10:25:29,479 - app.core.mt5_provider - INFO - MT5 disconnected.
+2026-09-05 11:33:29,022 - app.core.bot_observer - INFO - Establishing baseline for Bot Observer...
+2026-09-05 11:33:29,023 - app.core.bot_observer - INFO - OBSERVED: PRICE_SNAPSHOT - {'current_price': 1800.0}
+2026-09-05 11:33:29,024 - app.core.bot_observer - INFO - OBSERVED: POSITION_OPENED - {'ticket': 12345, 'position_id': 12345, 'direction': 'BUY', 'volume': 1.0, 'price': 1800.0, 'sl': 1790.0, 'tp': 1820.0, 'current_price': 1801.0, 'profit': 100.0, 'swap': 0.0, 'magic': 999, 'comment': 'EA'}
+2026-09-05 11:33:29,151 - app.core.historical_data - INFO - Exporting 1 M15 candles for XAUUSD...
+2026-09-05 11:33:29,157 - app.core.historical_data - INFO - Exported 1 candles to C:\Users\PDVR gaming\AppData\Local\Temp\pytest-of-PDVRgaming\pytest-4\test_export_candles0\XAUUSD_M15.csv
+2026-09-05 11:33:29,172 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-05 11:33:29,173 - app.core.mt5_provider - INFO - MT5 disconnected.
+2026-09-05 11:35:25,136 - app.core.bot_observer - INFO - Establishing baseline for Bot Observer...
+2026-09-05 11:35:25,137 - app.core.bot_observer - INFO - OBSERVED: PRICE_SNAPSHOT - {'current_price': 1800.0}
+2026-09-05 11:35:25,138 - app.core.bot_observer - INFO - OBSERVED: POSITION_OPENED - {'ticket': 12345, 'position_id': 12345, 'direction': 'BUY', 'volume': 1.0, 'price': 1800.0, 'sl': 1790.0, 'tp': 1820.0, 'current_price': 1801.0, 'profit': 100.0, 'swap': 0.0, 'magic': 999, 'comment': 'EA'}
+2026-09-05 11:36:20,648 - app.core.bot_observer - INFO - Establishing baseline for Bot Observer...
+2026-09-05 11:36:20,649 - app.core.bot_observer - INFO - OBSERVED: PRICE_SNAPSHOT - {'current_price': 1800.0}
+2026-09-05 11:36:20,650 - app.core.bot_observer - INFO - OBSERVED: POSITION_OPENED - {'ticket': 12345, 'position_id': 12345, 'direction': 'BUY', 'volume': 1.0, 'price': 1800.0, 'sl': 1790.0, 'tp': 1820.0, 'current_price': 1801.0, 'profit': 100.0, 'swap': 0.0, 'magic': 999, 'comment': 'EA'}
+2026-09-05 11:36:20,673 - app.core.historical_data - INFO - Exporting 1 M15 candles for XAUUSD...
+2026-09-05 11:36:20,677 - app.core.historical_data - INFO - Exported 1 candles to C:\Users\PDVR gaming\AppData\Local\Temp\pytest-of-PDVRgaming\pytest-6\test_export_candles0\XAUUSD_M15.csv
+2026-09-05 11:36:20,688 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-05 11:36:20,689 - app.core.mt5_provider - INFO - MT5 disconnected.
+2026-09-05 11:51:01,595 - app.core.bot_observer - INFO - Establishing baseline for Bot Observer...
+2026-09-05 11:51:01,596 - app.core.bot_observer - INFO - OBSERVED: PRICE_SNAPSHOT - {'current_price': 1800.0}
+2026-09-05 11:51:01,597 - app.core.bot_observer - INFO - OBSERVED: POSITION_OPENED - {'ticket': 12345, 'position_id': 12345, 'direction': 'BUY', 'volume': 1.0, 'price': 1800.0, 'sl': 1790.0, 'tp': 1820.0, 'current_price': 1801.0, 'profit': 100.0, 'swap': 0.0, 'magic': 999, 'comment': 'EA'}
+2026-09-05 11:51:01,615 - app.core.historical_data - INFO - Exporting 1 M15 candles for XAUUSD...
+2026-09-05 11:51:01,619 - app.core.historical_data - INFO - Exported 1 candles to C:\Users\PDVR gaming\AppData\Local\Temp\pytest-of-PDVRgaming\pytest-7\test_export_candles0\XAUUSD_M15.csv
+2026-09-05 11:51:01,630 - app.core.mt5_provider - INFO - MT5 connection established.
+2026-09-05 11:51:01,631 - app.core.mt5_provider - INFO - MT5 disconnected.

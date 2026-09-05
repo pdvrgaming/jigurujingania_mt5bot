@@ -1,0 +1,37 @@
+{
+    "name": "Trend_Continuation_Buy",
+    "version": 1,
+    "symbol": "XAUUSD",
+    "timeframe": "H1",
+    "direction": "BUY",
+    "conditions": {
+        "operator": "AND",
+        "rules": [
+            {
+                "left": {
+                    "type": "price",
+                    "name": "close"
+                },
+                "operator": ">",
+                "right": {
+                    "type": "indicator",
+                    "name": "EMA",
+                    "period": 50
+                }
+            },
+            {
+                "left": {
+                    "type": "indicator",
+                    "name": "EMA",
+                    "period": 20
+                },
+                "operator": ">",
+                "right": {
+                    "type": "indicator",
+                    "name": "EMA",
+                    "period": 50
+                }
+            }
+        ]
+    }
+}

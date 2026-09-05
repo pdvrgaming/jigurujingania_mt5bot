@@ -1,0 +1,6 @@
+PySide6
+pandas
+numpy
+MetaTrader5
+pytest
+pyinstaller

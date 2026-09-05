@@ -1,0 +1,645 @@
+MT5 Strategy Console — BUILD INSTRUCTIONS
+READ THIS FIRST
+You are an autonomous coding agent.
+The repository may initially be completely empty.
+Read this entire file before writing code.
+Build the project phase-by-phase.
+DO NOT skip phases.
+DO NOT jump ahead.
+DO NOT add unrelated features.
+At the end of every phase:
+1. Run tests.
+2. Verify the phase acceptance criteria.
+3. Fix failures.
+4. Only then continue.
+The final deliverable must be a Windows desktop .exe inside:
+release/
+The application must NOT automatically place, modify, or close trades.
+This is a read-only market-data, strategy-analysis and alert application.
+
+
+PRODUCT
+Name:
+MT5 Strategy Console
+Purpose:
+Allow a user to define trading rules, evaluate those rules against MT5 market data, monitor them live, and receive alerts.
+The user makes the final trading decision.
+The application does NOT execute trades.
+
+
+TECHNOLOGY
+Use:
+ Python
+ PySide6
+ pandas
+ numpy
+ MetaTrader5 Python package
+ SQLite
+ pytest
+ PyInstaller
+Target:
+Windows 10/11.
+No web server is required.
+No cloud backend is required.
+No database server is required.
+No Docker.
+No Kubernetes.
+No authentication.
+No payment system.
+
+
+ARCHITECTURE
+Use:
+PySide6 UI↓Application Services↓Strategy Engine↓Data Providers↓Storage
+Data providers:
+ MT5
+ CSV
+The strategy engine must be independent from:
+ PySide6
+ MT5
+ SQLite
+The same strategy engine must work for:
+ historical CSV data
+ live MT5 data
+
+
+PHASE 0 — PROJECT FOUNDATION
+Create:
+app/tests/data/logs/release/docs/
+Create a Python virtual environment.
+Create requirements.
+Create README.md.
+Create application entry point.
+Create a basic PySide6 window.
+Create logging.
+Create configuration system.
+Acceptance criteria:
+ Application starts.
+ Window appears.
+ Logging works.
+ Tests execute successfully.
+ Repository has clean structure.
+Do not continue if this fails.
+
+
+PHASE 1 — MT5 READ-ONLY CONNECTION
+Implement an MT5 data provider.
+The provider may ONLY read data.
+Allowed:
+ connect to local MT5 terminal
+ read symbols
+ read candles
+ read current prices
+ read positions
+ read orders
+ read historical deals
+ read historical orders
+Forbidden:
+ order_send
+ trade execution
+ position modification
+ position closing
+ any automatic trading operation
+The application must clearly show:
+MT5:CONNECTED
+or
+MT5:DISCONNECTED
+Allow the user to select:
+ Symbol
+ Timeframe
+Initial timeframes:
+M1M5M15M30H1H4D1
+Acceptance criteria:
+ Can detect MT5 terminal.
+ Can list symbols.
+ Can retrieve candle data.
+ Can retrieve current positions.
+ No trading API is used.
+
+
+PHASE 2 — HISTORICAL DATA
+Implement candle retrieval.
+Normalized format:
+timestampsymboltimeframeopenhighlowclosetick_volumespreadreal_volume
+Use UTC internally.
+Do not mix local timezone and UTC.
+Store normalized historical data as CSV when requested.
+Implement:
+export candles
+Acceptance criteria:
+A selected symbol/timeframe can produce a valid CSV.
+Example:
+data/candles/XAUUSD_M15.csv
+
+
+PHASE 3 — INDICATORS
+Implement deterministic:
+ SMA
+ EMA
+ RSI
+ ATR
+Use pandas/numpy.
+Do not use external trading signals.
+No AI.
+No prediction.
+No optimization.
+Add unit tests.
+Acceptance criteria:
+All indicators have tests.
+Same data produces same values.
+No future candle data is used.
+
+
+PHASE 4 — STRATEGY ENGINE
+Create an internal Strategy JSON format.
+Example:
+{"name": "EMA RSI Gold","version": 1,"symbol": "XAUUSD","timeframe": "M15","conditions": {"operator": "AND","rules": [{"left": {"type": "indicator","name": "EMA","period": 20},"operator": "crosses_above","right": {"type": "indicator","name": "EMA","period": 50}},{"left": {"type": "indicator","name": "RSI","period": 14},"operator": "greater_than","right": {"type": "constant","value": 50}}]}}
+Support:
+Indicators:
+ SMA
+ EMA
+ RSI
+ ATR
+Price:
+ Open
+ High
+ Low
+ Close
+Operators:
+ 
+ <
+ ==
+ =
+ <=
+ crosses_above
+ crosses_below
+Logic:
+ AND
+ OR
+Evaluate CLOSED candles by default.
+Acceptance criteria:
+Given:
+same data+same strategy
+the result must always be identical.
+
+
+PHASE 5 — STRATEGY DEBUGGER
+Every signal must explain itself.
+Example:
+SIGNAL: BUY
+EMA20:1234.20
+EMA50:1233.80
+Previous EMA20:1233.60
+Previous EMA50:1233.75
+Cross above:TRUE
+RSI14:57.2
+RSI > 50:TRUE
+FINAL:BUY CONDITIONS MET
+The user must be able to inspect exactly why a signal happened.
+This is a core product feature.
+
+
+PHASE 6 — DESKTOP STRATEGY BUILDER
+Build a clean PySide6 interface.
+User sees:
+Strategy Name
+Symbol
+Timeframe
+RULES
+[ EMA ] [20] [ crosses above ] [ EMA ] [50]
+AND
+[ RSI ] [14] [ greater than ] [50]
+[ + Add Rule ]
+[ Save Strategy ]
+The user should never need to write JSON.
+The UI creates Strategy JSON internally.
+Support:
+ Add rule
+ Remove rule
+ Edit rule
+ AND
+ OR
+ Validate
+ Save
+ Duplicate
+Every modification creates a new version.
+Never overwrite an old strategy version.
+
+
+PHASE 7 — CSV BACKTEST / REPLAY
+Allow:
+Select StrategySelect CSVSelect date range
+Run.
+The SAME strategy engine used for live monitoring must process historical candles.
+Output:
+ total candles
+ total signals
+ signal timestamps
+ signal direction
+ signal price
+ condition results
+Do NOT claim profitability.
+Do NOT automatically call signals profitable.
+Do NOT optimize parameters.
+The purpose is verification.
+
+
+PHASE 8 — CHART
+Add a clean candlestick chart.
+Show:
+ candles
+ selected indicators
+ BUY markers
+ SELL markers
+Click signal:
+Show:
+ time
+ price
+ strategy version
+ indicator values
+ condition results
+Keep it simple.
+
+
+PHASE 9 — LIVE MONITORING
+Implement:
+START MONITORINGSTOP MONITORING
+Flow:
+MT5↓new closed candle↓strategy engine↓conditions↓signal↓alert↓log
+Evaluate each candle once.
+Never repeatedly alert for the same candle.
+Persist the last processed candle timestamp.
+If MT5 disconnects:
+show:
+MT5 CONNECTION LOST
+When restored:
+show:
+MT5 CONNECTION RESTORED
+Never fail silently.
+
+
+PHASE 10 — DESKTOP ALERTS
+Use Windows desktop notifications if possible.
+Also show an in-app alert.
+Example:
+BUY CONDITIONS MET
+XAUUSDM15
+EMA20 crossed EMA50RSI14 = 57.3
+Price:3450.20
+Timestamp:2026-09-04 14:15 UTC
+No trade is executed.
+
+
+PHASE 11 — SIGNAL JOURNAL
+Store:
+signal_idstrategy_idstrategy_versionsymboltimeframetimestampdirectionpricecondition_results
+Allow user to record:
+ Took Trade
+ Ignored
+ Notes
+ Manual Entry
+ Manual Exit
+ Manual Result
+Clearly distinguish:
+SYSTEM SIGNAL
+from
+USER RECORDED TRADE
+
+
+PHASE 12 — DATA ANALYTICS
+Display statistics based only on recorded information.
+Signal statistics:
+ total signals
+ buy signals
+ sell signals
+ ignored signals
+User-recorded trade statistics:
+ trades taken
+ wins
+ losses
+ average result
+ manually recorded drawdown
+Never mix signal statistics with actual trading results.
+
+
+PHASE 13 — BOT ACTIVITY RECORDER
+THIS IS REQUIRED FOR THE COUSIN'S CURRENT 5-DAY TRIAL.
+Purpose:
+Observe the existing Gold/XAUUSD trial EA during its trial period.
+The recorder is READ-ONLY.
+It must NOT interfere with the existing EA.
+It must NOT modify trades.
+It must NOT send trades.
+It must NOT attach another EA to the chart.
+It must simply monitor the MT5 terminal/account and record observable activity.
+Target:
+XAUUSD
+Trial observation period:
+September 4, 2026 through September 9, 2026.
+The user may change the end date from Settings.
+
+
+RECORDER DATA
+Periodically inspect:
+ open positions
+ historical orders
+ historical deals
+ current XAUUSD price
+ XAUUSD candles
+ position changes
+ SL changes where observable
+ TP changes where observable
+Use the MT5 Python read-only APIs.
+Record every newly observed event.
+Do not duplicate events.
+
+
+RECORDER CSV
+Create:
+data/observations/
+Create:
+xauusd_trial_activity.csv
+Columns:
+timestamp_utcevent_typesymbolticketposition_idorder_iddeal_iddirectionvolumepricesltpcurrent_priceprofitswapcommissionmagiccommentreasonsource
+Possible event_type values:
+POSITION_OPENEDPOSITION_UPDATEDPOSITION_CLOSEDORDER_CREATEDORDER_UPDATEDDEAL_EXECUTEDPRICE_SNAPSHOT
+If a field is unavailable, leave it empty.
+Never invent data.
+
+
+IMPORTANT RECORDER RULE
+The recorder must capture OBSERVATIONS.
+It must NOT pretend to know the strategy.
+Example:
+GOOD:
+"BUY opened at 3450.20"
+BAD:
+"Bot bought because EMA20 crossed EMA50"
+unless that information is actually available.
+The system should distinguish:
+OBSERVED FACT
+from
+INFERENCE
+
+
+RECORDER SNAPSHOTS
+Every monitoring cycle should optionally save:
+timestampbidasklastspreadopen_position_count
+For XAUUSD.
+Default polling interval:
+5 seconds.
+Make configurable.
+Do not create excessive disk usage.
+
+
+RECORDER STARTUP
+When recorder starts:
+5. Connect to MT5.
+6. Record start time.
+7. Read existing XAUUSD positions.
+8. Read recent order/deal history.
+9. Establish baseline.
+10. Begin monitoring.
+Do not treat baseline records as new events unless they actually occurred during the observation period.
+
+
+RECORDER RECOVERY
+If application closes:
+save state.
+When restarted:
+continue without duplicating already recorded events.
+If MT5 disconnects:
+record:
+MT5_DISCONNECTED
+When restored:
+record:
+MT5_RECONNECTED
+
+
+RECORDER UI
+Create a dedicated:
+BOT OBSERVER
+page.
+Show:
+Status:RUNNING / STOPPED
+Symbol:XAUUSD
+Started:...
+End:2026-09-09
+Events captured:...
+Last update:...
+CSV:OPEN
+Buttons:
+[ START OBSERVER ][ STOP OBSERVER ][ OPEN CSV ]
+
+
+RECORDER PURPOSE
+After September 9, the CSV should allow us to inspect:
+ when the existing bot enters
+ when it exits
+ buy/sell behavior
+ trade frequency
+ position sizing
+ stop loss behavior
+ take profit behavior
+ trailing behavior if observable
+ holding time
+ reaction to market movement
+ repeated patterns
+Do NOT automatically reverse engineer or clone the bot.
+First collect evidence.
+
+
+PHASE 14 — NATURAL LANGUAGE STRATEGY
+ONLY AFTER EVERYTHING ABOVE WORKS.
+Allow user to type:
+"Buy gold when EMA20 crosses above EMA50 and RSI is above 50."
+AI may convert this into proposed Strategy JSON.
+Flow:
+USER TEXT↓AI↓PROPOSED STRATEGY↓VALIDATION↓USER REVIEW↓USER CONFIRMS↓SAVE
+AI must never directly execute trading actions.
+If ambiguous:
+ask user.
+Never silently guess.
+
+
+PHASE 15 — PROFESSIONAL UI
+Make it feel like a real desktop product.
+Navigation:
+DashboardStrategiesMonitorBacktestSignalsJournalBot ObserverDataSettings
+Dashboard:
+MT5 statusActive strategyMonitoring statusLatest signalLatest market dataObserver status
+Use professional spacing and typography.
+Avoid excessive gradients or "AI trading" gimmicks.
+The product should feel like analysis software.
+
+
+PHASE 16 — SETTINGS
+Settings:
+ MT5 connection
+ Default symbol
+ Default timeframe
+ Notification enabled
+ Polling interval
+ Data directory
+ Log directory
+ Observer settings
+Do not store broker passwords.
+Do not ask for broker passwords unless absolutely required by MT5 integration.
+Prefer the already logged-in local MT5 terminal.
+
+
+PHASE 17 — DATA EXPORT
+Allow export:
+Strategies → JSONSignals → CSVJournal → CSVMarket data → CSVBot observations → CSV
+All exports must be readable without the application.
+
+
+PHASE 18 — TESTING
+Create automated tests for:
+DATA
+ CSV loading
+ malformed CSV
+ duplicate candles
+ missing candles
+ timestamp handling
+INDICATORS
+ SMA
+ EMA
+ RSI
+ ATR
+STRATEGY
+ 
+ <
+ ==
+ =
+ <=
+ cross above
+ cross below
+ AND
+ OR
+ENGINE
+ deterministic results
+ closed candle evaluation
+ duplicate prevention
+ strategy version tracking
+RECORDER
+ event deduplication
+ new position detection
+ closed position detection
+ MT5 disconnect handling
+ restart recovery
+ CSV output
+
+
+PHASE 19 — SECURITY
+Absolutely forbidden:
+ arbitrary Python execution from strategy input
+ arbitrary JavaScript execution
+ arbitrary shell commands from strategy input
+ automatic trade execution
+ storing passwords in plain text
+ sending broker credentials to external services
+Strategy JSON must be treated as DATA.
+Never execute Strategy JSON as code.
+
+
+PHASE 20 — DOCUMENTATION
+Create:
+README.md
+docs/USER_GUIDE.md
+docs/STRATEGY_FORMAT.md
+docs/TESTING.md
+docs/BUILDING_EXE.md
+User guide must explain:
+11. Install MT5.
+12. Log into demo account.
+13. Start MT5.
+14. Open Strategy Console.
+15. Connect.
+16. Create strategy.
+17. Backtest.
+18. Start monitoring.
+19. Receive alerts.
+20. Decide manually.
+21. View history.
+22. Export data.
+Also explain:
+THE APPLICATION DOES NOT PLACE TRADES.
+
+
+PHASE 21 — BUILD EXE
+Use PyInstaller.
+Create:
+release/MT5_Strategy_Console.exe
+The final EXE must not require the user to install Python.
+Test the EXE.
+If possible, test on a clean Windows machine.
+The application must:
+ launch
+ show UI
+ connect to MT5
+ read data
+ monitor
+ notify
+ save data
+ restart correctly
+
+
+PHASE 22 — FINAL VALIDATION
+Run all automated tests.
+Then manually verify:
+[ ] Application launches[ ] MT5 connects[ ] XAUUSD appears[ ] Candle data works[ ] Strategy can be created[ ] Strategy can be saved[ ] Strategy versions work[ ] Backtest works[ ] Signals are correct[ ] Debug information works[ ] Live monitoring works[ ] Duplicate alerts are prevented[ ] Desktop notification works[ ] Signal journal works[ ] Bot Observer works[ ] XAUUSD observations are saved[ ] CSV exports work[ ] MT5 disconnect recovery works[ ] Application restart works[ ] No trading functions exist[ ] EXE works
+
+
+FINAL RELEASE STRUCTURE
+release/MT5_Strategy_Console.exeUSER_GUIDE.md
+The EXE is the primary deliverable.
+
+
+DEVELOPMENT DISCIPLINE
+DO NOT:
+ build automatic trading
+ add profitability guarantees
+ add crypto
+ add stocks
+ add cloud infrastructure
+ add accounts/login
+ add payments
+ add social features
+ add Telegram
+ add WhatsApp
+ add mobile app
+ add machine learning
+ add prediction
+ add strategy optimization
+ add copy trading
+ add broker execution
+unless explicitly requested later.
+FIRST make the core reliable.
+
+
+MOST IMPORTANT DESIGN PRINCIPLE
+The application must always preserve this chain:
+MARKET DATA↓USER DEFINED RULES↓DETERMINISTIC EVALUATION↓OBSERVABLE SIGNAL↓USER DECISION
+For the existing trial bot:
+MT5 OBSERVABLE ACTIVITY↓RAW DATA↓CSV↓HUMAN ANALYSIS
+Never confuse observed behavior with the bot's hidden strategy.
+
+
+FIRST MILESTONE
+Before building the complete product, implement only:
+PHASE 0PHASE 1PHASE 2PHASE 3PHASE 4
+Then run tests.
+After successful completion, implement:
+PHASE 13 — BOT ACTIVITY RECORDER
+because the cousin's trial period is time-sensitive.
+After the recorder works, continue with the remaining phases.
+At every milestone report:
+ completed
+ failed
+ tests
+ files created
+ how to run
+ next phase
+Do not claim completion without actually running the tests.
+END OF SPECIFICATION
