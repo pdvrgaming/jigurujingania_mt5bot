@@ -371,7 +371,7 @@ class LiveMonitorUI(QWidget):
         if not fp:
             return
         try:
-            with open(fp) as f:
+            with open(fp, encoding='utf-8-sig') as f:
                 strat = json.load(f)
             self.strategy = strat
             name = strat.get("name", "?")
@@ -400,7 +400,7 @@ class LiveMonitorUI(QWidget):
         if not fp:
             return
         try:
-            with open(fp) as f:
+            with open(fp, encoding='utf-8-sig') as f:
                 strat = json.load(f)
             self._add_strategy_obj(strat)
         except Exception as e:

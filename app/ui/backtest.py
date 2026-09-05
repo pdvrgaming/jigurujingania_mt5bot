@@ -446,7 +446,7 @@ class BacktestUI(QWidget):
         if not filepath:
             return
         try:
-            with open(filepath) as f:
+            with open(filepath, encoding='utf-8-sig') as f:
                 self.strategy = json.load(f)
             name = self.strategy.get("name", "Unknown")
             ver  = self.strategy.get("version", 1)

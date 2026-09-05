@@ -229,7 +229,7 @@ class StrategyBuilder(QWidget):
         filepath, _ = QFileDialog.getOpenFileName(self, "Load Strategy", str(self.strat_dir), "JSON Files (*.json)")
         if filepath:
             try:
-                with open(filepath, 'r') as f:
+                with open(filepath, 'r', encoding='utf-8-sig') as f:
                     content = f.read()
                 self.json_editor.setPlainText(content)
                 self.sync_from_json()
@@ -251,7 +251,7 @@ class StrategyBuilder(QWidget):
                 strat["version"] = v
                 filepath = self.strat_dir / f"{name}_v{v}.json"
                 
-            with open(filepath, "w") as f:
+            with open(filepath, "w", encoding='utf-8') as f:
                 json.dump(strat, f, indent=4)
                 
             QMessageBox.information(self, "Saved", f"Strategy saved as version {v}.")

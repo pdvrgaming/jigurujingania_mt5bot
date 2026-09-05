@@ -16,7 +16,7 @@ class Config:
 
     def load(self):
         if self.config_path.exists():
-            with open(self.config_path, "r") as f:
+            with open(self.config_path, "r", encoding="utf-8-sig") as f:
                 try:
                     loaded = json.load(f)
                     self.settings.update(loaded)
@@ -26,7 +26,7 @@ class Config:
             self.save()
 
     def save(self):
-        with open(self.config_path, "w") as f:
+        with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump(self.settings, f, indent=4)
 
     def get(self, key, default=None):
